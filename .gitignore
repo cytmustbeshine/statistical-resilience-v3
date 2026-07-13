@@ -1,0 +1,44 @@
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Editors and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+~$*
+
+# Model checkpoints and large generated arrays
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.hdf5
+*.npy
+*.npz
+checkpoints/
+
+# Local experiment outputs and raw data if later copied into this repository
+outputs/
+data/
+
+# Credentials and private keys
+credentials.json
+*.key
+*.pem
