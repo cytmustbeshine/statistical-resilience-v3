@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 import numpy as np
 from scipy import stats
-from statistical_resilience_profile import fit_hierarchical_normal_profile,fit_shrunk_conditional_ecdf,compute_probabilistic_resilience_state
+from statistical_resilience_profile import (
+    compute_probabilistic_resilience_state,
+    fit_hierarchical_normal_profile,
+    fit_shrunk_conditional_ecdf,
+)
 
 def match_node_variables(columns,flow_suffix,speed_suffix=None,occupancy_suffix=None):
     """Match flow, speed and occupancy columns by exact node base suffix."""
@@ -13,41 +17,78 @@ def match_node_variables(columns,flow_suffix,speed_suffix=None,occupancy_suffix=
     return [{"node":b,"flow_col":c,"speed_col":speeds.get(b),"occupancy_col":occs.get(b)} for b,c in flows.items()]
 
 def fit_variable_resilience_profile(values,train_end,timestamps,variable_name,tail_direction,transform_mode,**kwargs):
-    """Fit a train-only variable profile while recording direction and transform.
+    """Fit one train-only profile through the shared hierarchical implementation.
 
-    ``log1p_nonnegative`` delegates to the existing hierarchical ECDF estimator.
-    ``identity_robust`` applies a train-only positive offset before delegation;
-    the monotone shift preserves ranks and ECDF probabilities, including valid
-    negative standardized observations.
+    Args:
+        values: Variable observations with shape ``[T, N]``.
+        train_end: Exclusive training cutoff.
+        timestamps: Timestamps shared by all variables.
+        variable_name: Name stored in profile metadata.
+        tail_direction: ``lower``, ``upper`` or ``two_sided``.
+        transform_mode: ``log1p_nonnegative`` or ``identity_robust``.
+
+    Returns:
+        Dictionary containing the hierarchical profile and conditional ECDF.
     """
     x=np.asarray(values,float);end=int(np.clip(train_end,0,len(x)))
     if transform_mode not in {"log1p_nonnegative","identity_robust"}:raise ValueError("invalid transform_mode")
     if tail_direction not in {"lower","upper","two_sided"}:raise ValueError("invalid tail_direction")
-    offset=0.0
-    if transform_mode=="identity_robust":
-        finite=x[:end][np.isfinite(x[:end])];offset=max(0.0,-float(np.min(finite))+1.0) if finite.size else 1.0
-        proxy=np.where(np.isfinite(x),np.expm1(np.clip(x+offset,-50,50)),np.nan)
-    else:
-        proxy=x
-    profile=fit_hierarchical_normal_profile(proxy,end,timestamps,**kwargs);ecdf=fit_shrunk_conditional_ecdf(proxy,profile,end,timestamps)
-    profile.update(variable_name=variable_name,tail_direction=tail_direction,transform_mode=transform_mode,identity_offset=offset)
-    return {"profile":profile,"ecdf":ecdf,"proxy_values":proxy}
+    profile=fit_hierarchical_normal_profile(
+        x,end,timestamps,transform_mode=transform_mode,**kwargs
+    )
+    ecdf=fit_shrunk_conditional_ecdf(x,profile,end,timestamps)
+    profile.update(
+        variable_name=variable_name,
+        tail_direction=tail_direction,
+        transform_mode=transform_mode,
+        identity_offset=0.0,
+    )
+    return {"profile":profile,"ecdf":ecdf,"proxy_values":x}
+
 
 def compute_directional_probabilistic_deficit(values,variable_profile,timestamps,tail_direction=None,probability_floor=1e-4):
-    """Compute lower-, upper-, or two-sided train-calibrated probabilistic deficit."""
-    x=np.asarray(values,float);p=variable_profile["profile"];direction=tail_direction or p["tail_direction"];offset=float(p.get("identity_offset",0))
-    proxy=np.where(np.isfinite(x),np.expm1(np.clip(x+offset,-50,50)),np.nan) if p["transform_mode"]=="identity_robust" else x
-    base=compute_probabilistic_resilience_state(proxy,p,variable_profile["ecdf"],timestamps,probability_floor=probability_floor)
-    lower=base["p_lower"];mu=np.asarray(base["robust_z"])*0 # shape only
-    transformed=np.log1p(np.where(np.isfinite(proxy)&(proxy>=0),proxy,np.nan));loc=transformed-base["robust_z"]*1 # overwritten below
-    # Median gating is equivalent to p <= 0.5 for continuous ECDFs.
-    if direction=="lower":prob=lower;active=lower<=.5
-    elif direction=="upper":prob=1-lower;active=lower>=.5
-    else:prob=2*np.minimum(lower,1-lower);active=np.isfinite(lower)
-    prob=np.clip(prob,probability_floor,1);d=np.where(np.isfinite(x),np.where(active,-np.log(prob),0.0),np.nan)
-    end=min(int(p["train_end_exclusive"]),len(d));tv=d[:end][np.isfinite(d[:end])];clip=float(np.quantile(tv,.999)) if tv.size else -np.log(probability_floor);d=np.clip(d,0,max(clip,1e-6))
-    system=trimmed_system(d,.1);train=system[:end][np.isfinite(system[:end])];qs={f"q{int(q*100):02d}":float(np.quantile(train,q)) if train.size else np.nan for q in (.5,.75,.9,.95,.99)}
-    return {**base,"probability":prob,"probabilistic_deficit":d,"system_deficit":system,"system_resilience":np.exp(-system),"train_deficit_quantiles":qs,"deficit_clip_value":clip,"tail_direction":direction}
+    """Compute a direction-consistent train-calibrated probabilistic deficit.
+
+    Lower-tail loss is active below the conditional median, upper-tail loss is
+    active above it, and two-sided loss uses twice the smaller tail probability.
+    Missing or semantically unavailable observations remain NaN.
+    """
+    x=np.asarray(values,float);profile=variable_profile["profile"]
+    direction=tail_direction or profile["tail_direction"]
+    base=compute_probabilistic_resilience_state(
+        x,profile,variable_profile["ecdf"],timestamps,probability_floor=probability_floor
+    )
+    lower=base["p_lower"]
+    transformed=np.asarray(base["transformed_values"],float)
+    median=np.asarray(base["conditional_median"],float)
+    valid=np.asarray(base["valid_mask"],bool)
+    if direction=="lower":
+        probability=lower;active=transformed<median
+    elif direction=="upper":
+        probability=1-lower;active=transformed>median
+    elif direction=="two_sided":
+        probability=2*np.minimum(lower,1-lower);active=valid
+    else:
+        raise ValueError("invalid tail_direction")
+    probability=np.where(valid,np.clip(probability,probability_floor,1),np.nan)
+    deficit=np.where(valid,np.where(active,-np.log(probability),0.0),np.nan)
+    end=min(int(profile["train_end_exclusive"]),len(deficit))
+    train_values=deficit[:end][np.isfinite(deficit[:end])]
+    clip=float(np.quantile(train_values,.999)) if train_values.size else -np.log(probability_floor)
+    deficit=np.clip(deficit,0,max(clip,1e-6))
+    system=trimmed_system(deficit,.1)
+    train=system[:end][np.isfinite(system[:end])]
+    quantiles={f"q{int(q*100):02d}":float(np.quantile(train,q)) if train.size else np.nan for q in (.5,.75,.9,.95,.99)}
+    return {
+        **base,
+        "probability":probability,
+        "probabilistic_deficit":deficit,
+        "system_deficit":system,
+        "system_resilience":np.exp(-system),
+        "train_deficit_quantiles":quantiles,
+        "deficit_clip_value":clip,
+        "tail_direction":direction,
+    }
 
 def trimmed_system(values,trim=.1):
     """Aggregate node deficits with a finite-value symmetric trimmed mean."""

@@ -16,7 +16,7 @@ def load(name,max_nodes):
   all_maps=[dict(node=z,flow_col=z,speed_col=None,occupancy_col=None) for z in df if z not in {'ID',c['time'],'_dt'} and pd.api.types.is_numeric_dtype(df[z])]
  else:
   all_maps=match_node_variables(df.columns,c['flow'],c['speed'],c['occ'])
- flow_maps=all_maps[:max_nodes];joint_maps=[m for m in all_maps if m['speed_col'] is not None][:max_nodes];occ_maps=[m for m in all_maps if m['speed_col'] is not None and m['occupancy_col'] is not None][:max_nodes]
+ flow_maps=all_maps[:max_nodes];joint_maps=[m for m in flow_maps if m['speed_col'] is not None];occ_maps=[m for m in flow_maps if m['speed_col'] is not None and m['occupancy_col'] is not None]
  def read_maps(maps,key):
   return df[[m[key] for m in maps]].apply(pd.to_numeric,errors='coerce').to_numpy(float) if maps else None
  flow=read_maps(flow_maps,'flow_col');joint_flow=read_maps(joint_maps,'flow_col');speed=read_maps(joint_maps,'speed_col');occ=read_maps(occ_maps,'occupancy_col');event=pd.to_numeric(df[c['event']],errors='coerce').fillna(0).to_numpy(float) if c['event'] else None
