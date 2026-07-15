@@ -51,3 +51,17 @@ Reasons:
 6. Existing experiment commands include event/weather features prohibited by the preregistered baseline.
 
 Consequence: preserve the two-dimensional L4 statistical definition and keep model.py and the training loss frozen. A separate minimal pipeline-repair stage must fix splitting, explicit node selection, scaler/checkpoint metadata, event-free configuration and prediction export. Only after that repair passes the same audit may E-L4-1 training begin.
+
+## Accepted stage gate: E-L4-0R prediction-pipeline repair (2026-07-15)
+Decision: accept the minimal engineering repair and authorize the next E-L4-1 five-node smoke experiment.
+
+Accepted evidence:
+1. Strict raw-time split assignment yields disjoint target timestamps across train/validation/test.
+2. Flow and speed use independent scalers fitted only on the strict training prefix.
+3. Explicit ordered loading locks Typhoon to the fixed 16 matched flow-speed nodes.
+4. Checkpoints now preserve scaler, node, timestamp, split, seed and feature-contract metadata.
+5. Multi-horizon truth/prediction archives preserve aligned target timestamps and both scaled/physical values.
+6. The enforced baseline contract excludes event and weather inputs, scalar L4 targets, resilience heads, CVaR and uncertainty weighting.
+7. Compilation, 129 unittest tests and the five-dataset N41 repair audit passed with no blockers.
+
+Boundary of this acceptance: no neural-network training has occurred, so this does not establish that DGCN-STSGCN predicts flow, speed or L4 resilience well. It authorizes only the preregistered event-free, single-seed, five-node E-L4-1 smoke training. The L4 statistical profiles remain frozen; `model.py`, architecture and loss remain frozen; full N41 and three-seed experiments require the smoke stage to pass first.

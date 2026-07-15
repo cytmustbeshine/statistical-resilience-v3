@@ -68,3 +68,18 @@ E-L4-0 is complete and did not authorize training. The frozen L4 definition rema
 - current run_experiments dataset commands include event/weather features that are prohibited for E-L4-1.
 
 No model architecture, training loss, resilience head, CVaR, uncertainty weighting or conformal method was changed or run. E-L4-1, smoke training, N41 training and multi-seed experiments remain prohibited. The next study must preregister a minimal E-L4-0R pipeline repair before any forecasting experiment.
+
+## E-L4-0R prediction-pipeline repair decision (2026-07-15)
+The minimal E-L4-0R repair is complete and passed the five-dataset N41 stage-gate audit. The frozen two-dimensional L4 definition, `model.py`, the DGCN-STSGCN architecture and the training-loss mathematics were not changed.
+
+The repaired forecasting utilities now provide:
+1. raw-time target-disjoint train/validation/test window splits;
+2. one strictly train-only scaler per predicted variable;
+3. explicit ordered traffic-column selection and fixed Typhoon 16-node flow-speed pairing;
+4. checkpoint metadata containing dataset, variable, node order, history/horizon, split boundaries, scaler, timestamps, seed and feature contract;
+5. aligned multi-horizon prediction NPZ export in scaled and physical spaces;
+6. an event-free single-traffic-variable feature contract excluding weather, event signals, scalar L4 targets, resilience heads, CVaR and uncertainty weighting.
+
+Verification: compilation passed; 129 unittest tests passed (16 profile + 22 flow-speed + 41 L3 + 15 L4 + 35 pipeline); pytest is not installed in `D:\soft\Python310\python.exe`. The repaired audit reports `stage_a_passed=true`, `e_l4_1_authorized=true`, no blockers and `training_run=false`.
+
+Next authorized step: a separate event-free, single-seed, five-node E-L4-1 smoke training for Rainstorm, Typhoon and PEMS04. It must use independent flow/speed models, the repaired strict bundle, train-only static adjacency, frozen L4 profiles and aligned physical-space prediction export. Full N41 or multi-seed training is not yet authorized by this repair alone.

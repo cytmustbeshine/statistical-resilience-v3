@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -24,6 +25,14 @@ from data import (
 )
 from flow_speed_resilience import match_node_variables
 from model import DSTSGCN
+from l4_prediction_pipeline import (
+    event_free_feature_contract,
+    load_forecast_checkpoint,
+    load_prediction_archive,
+    save_forecast_checkpoint,
+    save_prediction_archive,
+    scaler_metadata,
+)
 
 
 DATASETS = {
@@ -362,6 +371,79 @@ def model_smoke(num_nodes: int, history: int, horizon: int) -> dict[str, object]
     }
 
 
+
+
+def repaired_artifact_smoke() -> dict[str, bool]:
+    """Roundtrip checkpoint metadata, prediction arrays and event-free contract."""
+    scaler = StandardScaler()
+    scaler.fit(np.arange(12.0).reshape(6, 2, 1))
+    contract = event_free_feature_contract()
+    metadata = {
+        "dataset": "synthetic",
+        "variable": "speed",
+        "node_names": ["a", "b"],
+        "history": 12,
+        "horizon": 3,
+        "train_time_end_exclusive": 6,
+        "val_time_end_exclusive": 8,
+        "seed": 42,
+        "scaler": scaler_metadata(scaler),
+        "timestamp_start": "2020-01-01T00:00:00",
+        "timestamp_end": "2020-01-01T00:55:00",
+        "input_features": contract["input_features"],
+        "event_features": contract["event_features"],
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        checkpoint_path = root / "model.pt"
+        save_forecast_checkpoint(
+            checkpoint_path, {"weight": torch.tensor([1.0])}, metadata
+        )
+        checkpoint = load_forecast_checkpoint(checkpoint_path)
+        checkpoint_ok = bool(
+            checkpoint["metadata"]["node_names"] == ["a", "b"]
+            and checkpoint["metadata"]["scaler"] == metadata["scaler"]
+        )
+
+        shape = (2, 3, 2, 1)
+        y_true = np.arange(np.prod(shape), dtype=float).reshape(shape)
+        y_pred = y_true + 0.5
+        target_timestamps = np.arange(6).reshape(2, 3).astype("datetime64[m]")
+        archive_path = root / "predictions.npz"
+        save_prediction_archive(
+            archive_path,
+            dataset="synthetic",
+            variable="speed",
+            split="validation",
+            target_timestamps=target_timestamps,
+            node_names=["a", "b"],
+            y_true_scaled=y_true,
+            y_pred_scaled=y_pred,
+            y_true_physical=y_true,
+            y_pred_physical=y_pred,
+            train_time_end_exclusive=6,
+            val_time_end_exclusive=8,
+            scaler=metadata["scaler"],
+            seed=42,
+        )
+        archive = load_prediction_archive(archive_path)
+        prediction_ok = bool(
+            archive["y_pred_physical"].shape == shape
+            and archive["target_timestamps"].shape == (2, 3)
+            and archive["node_names"].tolist() == ["a", "b"]
+        )
+    contract_ok = bool(
+        contract["input_features"] == ["traffic"]
+        and contract["event_features"] == []
+        and contract["weather_features"] == []
+        and not contract["cvar_enabled"]
+        and not contract["resilience_aux_enabled"]
+    )
+    return {
+        "checkpoint_roundtrip": checkpoint_ok,
+        "prediction_archive_roundtrip": prediction_ok,
+        "event_free_contract": contract_ok,
+    }
 def markdown_table(frame: pd.DataFrame, columns: list[str]) -> str:
     """Render a compact Markdown table without optional dependencies."""
     if frame.empty:
@@ -447,6 +529,34 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
         else:
             loaded_speed_names = []
 
+        paired_flow_cols = [
+            str(item["flow_col"]) for item in matches if item["speed_col"] is not None
+        ]
+        if speed_direct:
+            _, explicit_flow_names = load_wide_traffic_csv(
+                str(config["csv"]),
+                value_suffix=str(config["flow_suffix"]),
+                time_col=str(config["time_col"]),
+                value_columns=paired_flow_cols,
+                exclude_cols=["ID", "id"],
+            )
+            _, explicit_speed_names = load_wide_traffic_csv(
+                str(config["csv"]),
+                value_suffix=str(config["speed_suffix"]),
+                time_col=str(config["time_col"]),
+                value_columns=matched_speed_cols,
+                exclude_cols=["ID", "id"],
+            )
+            explicit_pair_ok = bool(
+                explicit_flow_names == paired_flow_cols
+                and explicit_speed_names == matched_speed_cols
+                and len(explicit_flow_names) == len(explicit_speed_names)
+            )
+        else:
+            explicit_flow_names = selected_flow_cols
+            explicit_speed_names = []
+            explicit_pair_ok = dataset == "bridge"
+
         demand_paths = profile_paths(dataset, "demand", l4_dir, source_profile_dir)
         efficiency_paths = profile_paths(dataset, "efficiency", l4_dir, source_profile_dir)
         demand_profile_ok = frozen_profile_available(demand_paths)
@@ -483,6 +593,7 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
                 "flow_training_supported": True,
                 "speed_training_supported_by_model": bool(speed_direct),
                 "paired_node_order_supported_by_current_loader": matched_order_ok,
+                "paired_node_order_supported_by_explicit_loader": explicit_pair_ok,
                 "demand_profile_read_only_available": demand_profile_ok,
                 "efficiency_profile_read_only_available": efficiency_profile_ok,
                 "efficiency_available": bool(dataset != "bridge" and speed_direct),
@@ -499,21 +610,38 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
     splits = pd.DataFrame(split_rows)
     scalers = pd.DataFrame(scaler_rows)
     smoke = model_smoke(args.max_nodes, args.history, args.horizon)
+    repair_smoke = repaired_artifact_smoke()
 
     checks = [
         {
-            "check_id": "current_target_splits_disjoint",
+            "check_id": "legacy_window_start_split",
             "status": "pass" if bool(splits["current_split_leak_free"].all()) else "fail",
-            "core_blocker": True,
-            "evidence": "Current train/val/test window-start splits share target timestamps when horizon > 1.",
-            "minimum_change": "Use raw-time target boundaries and omit boundary-crossing windows.",
+            "core_blocker": False,
+            "evidence": "Legacy train.py window-start splits overlap targets for horizon > 1.",
+            "minimum_change": "E-L4 must use split_traffic_window_indices_strict().",
         },
         {
-            "check_id": "scaler_strict_train_only",
-            "status": "pass" if bool((splits["scaler_includes_val_target_steps"] == 0).all()) else "fail",
+            "check_id": "strict_target_splits_disjoint",
+            "status": "pass" if bool(splits["strict_split_leak_free"].all()) else "fail",
             "core_blocker": True,
-            "evidence": "The current 60% raw-time scaler reaches into the first validation targets.",
-            "minimum_change": "Fit scaler on the exact raw-time training boundary used by strict splits.",
+            "evidence": "Raw-time target-boundary splits omit crossing windows.",
+            "minimum_change": "No further split repair required.",
+        },
+        {
+            "check_id": "legacy_scaler_boundary",
+            "status": "pass" if bool((splits["scaler_includes_val_target_steps"] == 0).all()) else "fail",
+            "core_blocker": False,
+            "evidence": "Legacy train.py scaler boundary includes early validation targets.",
+            "minimum_change": "E-L4 must fit from strict split train_time_end_exclusive.",
+        },
+        {
+            "check_id": "strict_scaler_train_only",
+            "status": "pass" if bool(
+                splits["strict_split_leak_free"].all() and scalers["roundtrip_pass"].all()
+            ) else "fail",
+            "core_blocker": True,
+            "evidence": "The repaired bundle fits one scaler per variable on the strict training prefix.",
+            "minimum_change": "No further scaler repair required.",
         },
         {
             "check_id": "variable_scaler_roundtrip",
@@ -523,11 +651,13 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
             "minimum_change": "Persist each variable scaler in checkpoint metadata.",
         },
         {
-            "check_id": "paired_node_loader_order",
-            "status": "pass" if bool(capability["paired_node_order_supported_by_current_loader"].all()) else "fail",
+            "check_id": "explicit_paired_node_loader_order",
+            "status": "pass" if bool(
+                capability["paired_node_order_supported_by_explicit_loader"].all()
+            ) else "fail",
             "core_blocker": True,
-            "evidence": "Suffix-only max_nodes loading cannot lock Typhoon to the fixed 16 matched bases.",
-            "minimum_change": "Add an explicit ordered value-column/node-name selector to data.py.",
+            "evidence": "Explicit ordered value_columns locks Typhoon to the fixed 16 matched bases.",
+            "minimum_change": "No further node-loader repair required.",
         },
         {
             "check_id": "frozen_profiles_available",
@@ -536,8 +666,8 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
                 and capability.loc[capability.dataset != "bridge", "efficiency_profile_read_only_available"].all()
             ) else "fail",
             "core_blocker": True,
-            "evidence": "Demand profiles are in L4 output; core speed profiles remain in the verified L3 source package.",
-            "minimum_change": "Load existing files read-only; never refit on validation/test.",
+            "evidence": "Demand and core speed profiles are available read-only.",
+            "minimum_change": "Never refit profiles on validation/test.",
         },
         {
             "check_id": "model_generic_flow_speed_output",
@@ -548,24 +678,24 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
         },
         {
             "check_id": "checkpoint_contains_scaler_nodes_timestamps",
-            "status": "fail",
+            "status": "pass" if repair_smoke["checkpoint_roundtrip"] else "fail",
             "core_blocker": True,
-            "evidence": "train.py saves only model.state_dict() to best_dstsgcn.pt.",
-            "minimum_change": "A dedicated runner must save variable, node names, scaler, splits, timestamps and seed metadata.",
+            "evidence": "Auditable checkpoint bundle roundtrip includes scaler, nodes, splits and timestamps.",
+            "minimum_change": "E-L4 runner must use save_forecast_checkpoint().",
         },
         {
             "check_id": "prediction_arrays_exported",
-            "status": "fail",
+            "status": "pass" if repair_smoke["prediction_archive_roundtrip"] else "fail",
             "core_blocker": True,
-            "evidence": "evaluate() returns aggregate metrics and does not export aligned predictions.",
-            "minimum_change": "Add a dedicated prediction/export evaluator without changing model.py or loss.",
+            "evidence": "Aligned multi-horizon physical/scaled prediction NPZ roundtrip passed.",
+            "minimum_change": "E-L4 runner must use save_prediction_archive().",
         },
         {
             "check_id": "event_signal_absent_from_training",
-            "status": "fail",
+            "status": "pass" if repair_smoke["event_free_contract"] else "fail",
             "core_blocker": True,
-            "evidence": "run_experiments.py currently includes precipitation/typhoon columns in active dataset commands.",
-            "minimum_change": "Dedicated E-L4 runner must omit event and weather features.",
+            "evidence": "The repaired contract permits only the traffic feature and disables event/weather inputs.",
+            "minimum_change": "E-L4 runner must enforce event_free_feature_contract().",
         },
         {
             "check_id": "static_adjacency_train_only",
@@ -597,7 +727,7 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
 
     blockers = audit[(audit["core_blocker"]) & (audit["status"] != "pass")]
     report = [
-        "# E-L4-0 \u795e\u7ecf\u7f51\u7edc\u9884\u6d4b\u7ba1\u7ebf\u5ba1\u8ba1",
+        "# E-L4-0R \u795e\u7ecf\u7f51\u7edc\u9884\u6d4b\u7ba1\u7ebf\u4fee\u590d\u590d\u5ba1",
         "",
         "## \u9636\u6bb5\u7ed3\u8bba",
         "",
@@ -621,7 +751,7 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
             capability,
             [
                 "dataset", "selected_flow_nodes", "matched_speed_nodes", "matched_rate",
-                "paired_node_order_supported_by_current_loader",
+                "paired_node_order_supported_by_explicit_loader",
                 "demand_profile_read_only_available", "efficiency_profile_read_only_available",
             ],
         ),
@@ -641,24 +771,24 @@ def run_audit(args: argparse.Namespace) -> dict[str, object]:
         "",
         "## \u8282\u70b9\u5339\u914d",
         "",
-        "Rainstorm \u548c PEMS \u53ef\u4ee5\u6309\u540c\u540d suffix \u5339\u914d\u3002Typhoon \u524d41\u4e2a flow \u4e2d\u53ea\u670916\u4e2a\u540c\u540d speed\uff1b\u5f53\u524d suffix-only speed loader \u4f1a\u9009\u62e9\u524d41\u4e2a speed\uff0c\u4e0d\u80fd\u4fdd\u8bc1\u56fa\u5b9a16\u8282\u70b9\u53ca\u90bb\u63a5\u77e9\u9635\u987a\u5e8f\u4e00\u81f4\u3002",
+        "Rainstorm \u548c PEMS \u53ef\u4ee5\u6309\u540c\u540d suffix \u5339\u914d\u3002Typhoon \u524d41\u4e2a flow \u4e2d\u670916\u4e2a\u540c\u540d speed\uff1b\u4fee\u590d\u540e\u7684\u663e\u5f0f value_columns \u5df2\u5206\u522b\u9501\u5b9a\u8fd916\u4e2a flow \u548c speed\uff0c\u5e76\u4fdd\u6301\u76f8\u540c\u8282\u70b9\u987a\u5e8f\u3002",
         "",
         "## \u51bb\u7ed3 L4 profile",
         "",
         "\u9700\u6c42 profile \u53ef\u4ece L4 \u8f93\u51fa\u53ea\u8bfb\u52a0\u8f7d\uff1b\u6838\u5fc3 speed profile \u4ecd\u5b58\u653e\u5728\u5df2\u9a8c\u8bc1\u7684 `latent_traffic_performance_l3/<dataset>/speed_profile_*`\uff0c\u53ef\u53ea\u8bfb\u590d\u7528\uff0c\u4f46\u4e0d\u80fd\u5728\u9a8c\u8bc1\u6216\u6d4b\u8bd5\u6bb5\u91cd\u65b0\u62df\u5408\u3002",
         "",
-        "## \u5fc5\u987b\u5148\u5b8c\u6210\u7684\u6700\u5c0f\u4fee\u590d",
+        "## \u5269\u4f59\u6838\u5fc3\u963b\u585e",
         "",
         *[f"- `{row.check_id}`\uff1a{row.minimum_change}" for row in blockers.itertuples()],
         "",
         "## \u9636\u6bb5\u95e8\u51b3\u5b9a",
         "",
-        "\u7531\u4e8e\u5b58\u5728\u76ee\u6807\u65f6\u95f4\u91cd\u53e0\u3001scaler \u9a8c\u8bc1\u76ee\u6807\u6cc4\u6f0f\u3001Typhoon \u8282\u70b9\u9501\u5b9a\u7f3a\u5931\u3001checkpoint \u5143\u6570\u636e\u7f3a\u5931\u548c\u9884\u6d4b\u6570\u7ec4\u672a\u5bfc\u51fa\uff0c\u672c\u8f6e\u5728\u9636\u6bb5 A \u505c\u6b62\u3002",
-        "\u4e0d\u5f97\u628a\u8fd9\u4e9b\u95ee\u9898\u7559\u5230\u8bad\u7ec3\u540e\u518d\u89e3\u91ca\uff0c\u4e5f\u4e0d\u5f97\u901a\u8fc7\u589e\u52a0\u97e7\u6027\u5934\u3001CVaR\u3001\u5929\u6c14\u7279\u5f81\u6216\u7f51\u7edc\u590d\u6742\u5ea6\u7ed5\u8fc7\u3002",
+        "\u4fee\u590d\u540e\u5168\u90e8\u6838\u5fc3\u68c0\u67e5\u901a\u8fc7\uff0cE-L4-1 \u5df2\u83b7\u5de5\u7a0b\u9636\u6bb5\u95e8\u6388\u6743\uff1b\u672c\u8f6e\u4ecd\u672a\u8bad\u7ec3\u795e\u7ecf\u7f51\u7edc\u3002" if stage_a_passed else "\u4ecd\u6709\u6838\u5fc3\u963b\u585e\uff0c\u7981\u6b62\u8fdb\u5165 E-L4-1\u3002",
+        "\u540e\u7eed\u8bad\u7ec3\u4ecd\u4e0d\u5f97\u52a0\u5165\u97e7\u6027\u5934\u3001CVaR\u3001\u5929\u6c14\u6216\u4e8b\u4ef6\u7279\u5f81\uff0c\u4e5f\u4e0d\u5f97\u4fee\u6539\u7f51\u7edc\u9aa8\u67b6\u548c\u8bad\u7ec3\u635f\u5931\u3002",
     ]
     (output_dir / "e_l4_0_audit_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     decision = {
-        "stage": "E-L4-0",
+        "stage": "E-L4-0R",
         "stage_a_passed": stage_a_passed,
         "e_l4_1_authorized": stage_a_passed,
         "blockers": blockers["check_id"].tolist(),

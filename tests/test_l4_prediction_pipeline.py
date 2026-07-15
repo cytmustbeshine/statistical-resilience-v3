@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,8 +33,19 @@ from audit_l4_prediction_pipeline import (
     target_bounds,
     target_timestamp_matrix,
 )
-from data import StandardScaler
+from data import StandardScaler, load_wide_traffic_csv, split_traffic_window_indices_strict
 from flow_speed_resilience import match_node_variables
+from l4_prediction_pipeline import (
+    event_free_feature_contract,
+    fit_train_only_scaler,
+    load_forecast_checkpoint,
+    load_prediction_archive,
+    paired_column_plan,
+    save_forecast_checkpoint,
+    save_prediction_archive,
+    scaler_metadata,
+    strict_data_bundle,
+)
 
 
 class TestL4PredictionPipeline(unittest.TestCase):
@@ -214,6 +226,142 @@ class TestL4PredictionPipeline(unittest.TestCase):
         self.assertIn("demand_deficit_pred", schema)
         self.assertIn("efficiency_deficit_pred", schema)
 
+
+    def test_repaired_strict_split_is_target_disjoint(self):
+        train, val, test, info = split_traffic_window_indices_strict(100, 4, 3)
+        self.assertTrue(info["target_disjoint"])
+        self.assertLess(target_bounds(train[-1], 4, 3)[1], info["train_time_end_exclusive"])
+        self.assertGreaterEqual(target_bounds(val[0], 4, 3)[0], info["train_time_end_exclusive"])
+        self.assertLess(target_bounds(val[-1], 4, 3)[1], info["val_time_end_exclusive"])
+        self.assertGreaterEqual(target_bounds(test[0], 4, 3)[0], info["val_time_end_exclusive"])
+
+    def test_explicit_value_columns_preserve_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "traffic.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2020-01-01", periods=3, freq="5min"),
+                    "a_volume": [1.0, 2.0, 3.0],
+                    "b_volume": [4.0, 5.0, 6.0],
+                }
+            ).to_csv(path, index=False)
+            data, names = load_wide_traffic_csv(
+                str(path),
+                value_suffix="_volume",
+                time_col="Time",
+                value_columns=["b_volume", "a_volume"],
+            )
+            self.assertEqual(names, ["b_volume", "a_volume"])
+            np.testing.assert_array_equal(data[0, :, 0], [4.0, 1.0])
+
+    def test_explicit_value_columns_reject_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "traffic.csv"
+            pd.DataFrame(
+                {"Time": ["2020-01-01"], "a_volume": [1.0]}
+            ).to_csv(path, index=False)
+            with self.assertRaises(ValueError):
+                load_wide_traffic_csv(
+                    str(path),
+                    value_suffix="_volume",
+                    time_col="Time",
+                    value_columns=["a_volume", "a_volume"],
+                )
+
+    def test_paired_column_plan_locks_typhoon_subnet(self):
+        columns = ["Time"]
+        for index in range(41):
+            columns.append(f"n{index}_volume")
+            if index >= 25:
+                columns.append(f"n{index}_speed")
+        plan = paired_column_plan(columns, "_volume", "_speed", 41)
+        self.assertEqual(len(plan["paired_node_names"]), 16)
+        self.assertEqual(plan["paired_node_names"], [f"n{i}" for i in range(25, 41)])
+        self.assertEqual(
+            plan["paired_speed_columns"], [f"n{i}_speed" for i in range(25, 41)]
+        )
+
+    def test_repaired_scaler_uses_strict_train_prefix(self):
+        values = np.concatenate(
+            [np.zeros((6, 2, 1)), np.full((4, 2, 1), 1000.0)], axis=0
+        )
+        scaler, _ = fit_train_only_scaler(values, 6)
+        self.assertEqual(float(np.asarray(scaler.mean).reshape(-1)[0]), 0.0)
+
+    def _checkpoint_metadata(self, scaler):
+        return {
+            "dataset": "synthetic",
+            "variable": "speed",
+            "node_names": ["a", "b"],
+            "history": 4,
+            "horizon": 3,
+            "train_time_end_exclusive": 6,
+            "val_time_end_exclusive": 8,
+            "seed": 42,
+            "scaler": scaler_metadata(scaler),
+            "timestamp_start": "2020-01-01T00:00:00",
+            "timestamp_end": "2020-01-01T00:45:00",
+            "input_features": ["traffic"],
+            "event_features": [],
+        }
+
+    def test_checkpoint_metadata_roundtrip(self):
+        scaler = StandardScaler()
+        scaler.fit(np.arange(12.0).reshape(6, 2, 1))
+        metadata = self._checkpoint_metadata(scaler)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.pt"
+            save_forecast_checkpoint(path, {"weight": torch.tensor([2.0])}, metadata)
+            loaded = load_forecast_checkpoint(path)
+            self.assertEqual(loaded["metadata"]["node_names"], ["a", "b"])
+            self.assertEqual(loaded["metadata"]["scaler"], metadata["scaler"])
+            self.assertEqual(float(loaded["model_state_dict"]["weight"][0]), 2.0)
+
+    def test_prediction_archive_contains_aligned_horizons(self):
+        scaler = StandardScaler()
+        scaler.fit(np.arange(12.0).reshape(6, 2, 1))
+        shape = (2, 3, 2, 1)
+        truth = np.arange(np.prod(shape), dtype=float).reshape(shape)
+        timestamps = np.arange(6).reshape(2, 3).astype("datetime64[m]")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "predictions.npz"
+            save_prediction_archive(
+                path,
+                dataset="synthetic",
+                variable="speed",
+                split="validation",
+                target_timestamps=timestamps,
+                node_names=["a", "b"],
+                y_true_scaled=truth,
+                y_pred_scaled=truth + 1.0,
+                y_true_physical=truth,
+                y_pred_physical=truth + 1.0,
+                train_time_end_exclusive=6,
+                val_time_end_exclusive=8,
+                scaler=scaler_metadata(scaler),
+                seed=42,
+            )
+            loaded = load_prediction_archive(path)
+            self.assertEqual(loaded["target_timestamps"].shape, (2, 3))
+            self.assertEqual(loaded["node_names"].tolist(), ["a", "b"])
+            np.testing.assert_array_equal(loaded["horizons"], [1, 2, 3])
+
+    def test_strict_data_bundle_keeps_timestamp_alignment(self):
+        values = np.arange(200.0).reshape(100, 2, 1)
+        timestamps = np.arange(100).astype("datetime64[m]")
+        bundle = strict_data_bundle(values, timestamps, history=4, horizon=3)
+        self.assertEqual(bundle["val_target_timestamps"].shape[1], 3)
+        self.assertTrue(bundle["split_info"]["target_disjoint"])
+        self.assertEqual(bundle["scaler_metadata"]["type"], "StandardScaler")
+
+    def test_event_free_feature_contract(self):
+        contract = event_free_feature_contract()
+        self.assertEqual(contract["input_features"], ["traffic"])
+        self.assertEqual(contract["event_features"], [])
+        self.assertEqual(contract["weather_features"], [])
+        self.assertFalse(contract["resilience_aux_enabled"])
+        self.assertFalse(contract["cvar_enabled"])
+        self.assertFalse(contract["scalar_l4_target"])
 
 if __name__ == "__main__":
     unittest.main()

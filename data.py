@@ -1,4 +1,4 @@
-﻿"""Data utilities for traffic forecasting experiments."""
+"""Data utilities for traffic forecasting experiments."""
 
 from __future__ import annotations
 
@@ -129,6 +129,60 @@ def split_traffic_window_indices(
     }
     return train_indices, val_indices, test_indices, info
 
+
+def split_traffic_window_indices_strict(
+    num_timesteps: int,
+    history: int,
+    horizon: int,
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
+    """Build target-disjoint chronological forecasting-window splits.
+
+    Raw-time boundaries define the split membership of the complete target
+    horizon. A validation or test input may use earlier historical context, but
+    every target timestamp belongs to exactly one split. Windows whose targets
+    cross a raw-time boundary are omitted.
+
+    Args:
+        num_timesteps: Number of rows in the chronological raw series.
+        history: Number of historical input steps.
+        horizon: Number of future target steps.
+        train_ratio: Exclusive raw-time training boundary ratio.
+        val_ratio: Validation share following the training boundary.
+
+    Returns:
+        Train, validation and test window-start indices plus boundary metadata.
+    """
+    if num_timesteps < 0 or history <= 0 or horizon <= 0:
+        raise ValueError("num_timesteps must be nonnegative; history and horizon must be positive")
+    if not (0.0 < train_ratio < 1.0 and 0.0 <= val_ratio < 1.0):
+        raise ValueError("invalid train/validation ratios")
+    if train_ratio + val_ratio >= 1.0:
+        raise ValueError("train_ratio + val_ratio must be less than 1")
+    num_windows = max(0, num_timesteps - history - horizon + 1)
+    windows = np.arange(num_windows, dtype=int)
+    target_start = windows + history
+    target_end = target_start + horizon - 1
+    train_time_end = int(num_timesteps * train_ratio)
+    val_time_end = int(num_timesteps * (train_ratio + val_ratio))
+    train = windows[target_end < train_time_end]
+    val = windows[(target_start >= train_time_end) & (target_end < val_time_end)]
+    test = windows[(target_start >= val_time_end) & (target_end < num_timesteps)]
+    info = {
+        "split_mode": "chronological_strict",
+        "num_timesteps": int(num_timesteps),
+        "num_windows": int(num_windows),
+        "train_time_end_exclusive": int(train_time_end),
+        "val_time_end_exclusive": int(val_time_end),
+        "train_windows": int(len(train)),
+        "val_windows": int(len(val)),
+        "test_windows": int(len(test)),
+        "omitted_boundary_windows": int(num_windows - len(train) - len(val) - len(test)),
+        "target_disjoint": True,
+    }
+    return train, val, test, info
+
 class StandardScaler:
     """Simple z-score scaler for traffic tensors."""
 
@@ -243,6 +297,7 @@ def load_wide_traffic_csv(
     node_feature_suffixes: list[str] | None = None,
     add_time_features: bool = False,
     exclude_cols: list[str] | None = None,
+    value_columns: list[str] | None = None,
     return_feature_names: bool = False,
 ) -> tuple[np.ndarray, list[str]] | tuple[np.ndarray, list[str], list[str]]:
     """
@@ -252,6 +307,9 @@ def load_wide_traffic_csv(
         Time, 1111570_volume, 1116139_volume, ...
 
     If value_suffix is provided, only columns ending with that suffix are used.
+    If value_columns is provided, those columns are loaded in exactly the
+    supplied order. This is required for matched flow-speed subnetworks and
+    takes precedence over suffix scanning.
     For example, value_suffix="_volume" loads traffic volume columns.
     """
 
@@ -269,14 +327,34 @@ def load_wide_traffic_csv(
             df = df.sort_values(time_col).reset_index(drop=True)
 
     exclude_set = set(exclude_cols or [])
-    numeric_cols = []
-    for col in df.columns:
-        if col == time_col or col in exclude_set:
-            continue
-        if value_suffix and not str(col).endswith(value_suffix):
-            continue
-        if pd.api.types.is_numeric_dtype(df[col]):
-            numeric_cols.append(col)
+    if value_columns is not None:
+        numeric_cols = list(map(str, value_columns))
+        if len(numeric_cols) != len(set(numeric_cols)):
+            raise ValueError("value_columns contains duplicate columns")
+        missing = [column for column in numeric_cols if column not in df.columns]
+        if missing:
+            raise ValueError(f"Requested value columns are missing: {missing}")
+        forbidden = [
+            column for column in numeric_cols if column == time_col or column in exclude_set
+        ]
+        if forbidden:
+            raise ValueError(f"Requested value columns are excluded identifiers: {forbidden}")
+        nonnumeric = [
+            column for column in numeric_cols if not pd.api.types.is_numeric_dtype(df[column])
+        ]
+        if nonnumeric:
+            raise ValueError(f"Requested value columns are not numeric: {nonnumeric}")
+        if value_suffix and any(not column.endswith(value_suffix) for column in numeric_cols):
+            raise ValueError("Explicit value columns do not all match value_suffix")
+    else:
+        numeric_cols = []
+        for col in df.columns:
+            if col == time_col or col in exclude_set:
+                continue
+            if value_suffix and not str(col).endswith(value_suffix):
+                continue
+            if pd.api.types.is_numeric_dtype(df[col]):
+                numeric_cols.append(col)
 
     if max_nodes is not None:
         numeric_cols = numeric_cols[:max_nodes]

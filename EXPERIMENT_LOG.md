@@ -52,3 +52,22 @@ Results:
 - inference-only DSTSGCN smoke produced finite [2,12,5,1] output from [2,12,5,1] input;
 - 26 new pipeline tests and all previous 94 tests passed (120 unittest total); pytest is not installed.
 Decision: reject entry to E-L4-1. No neural-network training was run.
+
+## E-L4-0R prediction-pipeline repair (2026-07-15)
+Environment: Windows PowerShell; Python `D:\soft\Python310\python.exe`; branch `main`; baseline commit `31e5fc0`.
+
+Scope: repaired only split assignment, train-only scaler fitting, explicit ordered node selection, checkpoint metadata, aligned multi-horizon prediction export and the event-free feature contract. No network training was run and `model.py`/training-loss mathematics were not modified.
+
+Verification commands/results:
+- `python -m py_compile data.py l4_prediction_pipeline.py audit_l4_prediction_pipeline.py tests/test_l4_prediction_pipeline.py`: passed.
+- `python tests/test_statistical_resilience_profile.py`: 16 passed.
+- `python tests/test_flow_speed_resilience.py`: 22 passed.
+- `python tests/test_latent_traffic_performance.py`: 41 passed.
+- `python tests/test_two_factor_traffic_resilience.py`: 15 passed.
+- `python tests/test_l4_prediction_pipeline.py`: 35 passed.
+- Total unittest: 129 passed.
+- `python -m pytest --version`: unavailable (`No module named pytest`); this is not reported as a pytest pass.
+- Five-dataset N41 audit command: `python audit_l4_prediction_pipeline.py --output-dir D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline --max-nodes 41 --history 12 --horizon 12`.
+- Audit decision: `stage_a_passed=true`, `e_l4_1_authorized=true`, `blockers=[]`, `model_py_modified=false`, `training_run=false`.
+
+Outputs refreshed in `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline`: prediction pipeline audit, dataset capability, node alignment, split-window, scaler roundtrip, UTF-8 Chinese report and decision JSON. Outputs and temporary smoke artifacts are not committed.
