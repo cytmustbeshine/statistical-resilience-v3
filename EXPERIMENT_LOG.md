@@ -39,3 +39,16 @@ Results:
 - PEMS04 efficiency factor loadings: speed 0.3198, reversed occupancy 0.6348; test high-state 15.77% versus speed-only 7.78%.
 - PEMS08 efficiency factor loadings: speed 0.4766, reversed occupancy 0.6366; test high-state 17.13% versus speed-only 12.74%.
 Decision: support the two-dimension demand/efficiency framework, restrict the occupancy extension, prohibit scalar recombination, and keep neural integration frozen.
+## E-L4-0 prediction-pipeline audit (2026-07-15)
+Output: D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline
+Configuration: five datasets, max_nodes=41, history=12, horizon=12, no training.
+Artifacts: prediction_pipeline_audit.csv, dataset_prediction_capability.csv, node_alignment_audit.csv, split_window_audit.csv, scaler_roundtrip_audit.csv, e_l4_0_audit_report.md and e_l4_0_decision.json.
+Results:
+- all five datasets have 11 overlapping target timestamps at both adjacent split boundaries under the current split implementation;
+- the current scaler cutoff includes 2 validation target timestamps on every audited dataset;
+- strict raw-time target-boundary splits reduce target overlap to zero;
+- Bridge supports flow only; Rainstorm and PEMS selected nodes match flow/speed; Typhoon has 16 matched speed nodes among the first 41 flow nodes but the current loader cannot explicitly select the corresponding paired subnetwork;
+- frozen demand and core speed profiles are available read-only;
+- inference-only DSTSGCN smoke produced finite [2,12,5,1] output from [2,12,5,1] input;
+- 26 new pipeline tests and all previous 94 tests passed (120 unittest total); pytest is not installed.
+Decision: reject entry to E-L4-1. No neural-network training was run.

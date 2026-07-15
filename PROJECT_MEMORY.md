@@ -58,3 +58,13 @@ Current recommended statistical definition:
 6. do not create a weighted scalar L4 score.
 
 This completes the offline definition study at the descriptive statistical level, but does not authorize neural-network integration. A separate preregistered study is required to choose vector supervision, multi-task learning, or event-process objectives.
+## E-L4-0 prediction-pipeline audit decision (2026-07-15)
+E-L4-0 is complete and did not authorize training. The frozen L4 definition remains unchanged. The current DSTSGCN model is shape-compatible with independent flow and speed forecasting, but the surrounding pipeline fails the stage gate:
+- chronological splits are made by window start, causing 11 shared target timestamps at each train/validation and validation/test boundary for horizon=12;
+- the scaler raw-time cutoff includes 14 validation-input steps and 2 validation-target steps;
+- the suffix-only loader cannot explicitly lock Typhoon to the fixed 16 matched flow-speed nodes with matching adjacency order;
+- checkpoints contain only the state_dict and omit variable, node order, scaler, split and timestamp metadata;
+- evaluate() does not export aligned multi-horizon predictions;
+- current run_experiments dataset commands include event/weather features that are prohibited for E-L4-1.
+
+No model architecture, training loss, resilience head, CVaR, uncertainty weighting or conformal method was changed or run. E-L4-1, smoke training, N41 training and multi-seed experiments remain prohibited. The next study must preregister a minimal E-L4-0R pipeline repair before any forecasting experiment.

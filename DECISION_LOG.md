@@ -40,3 +40,14 @@ Restricted/rejected:
 - Do not treat Bridge as evidence for an efficiency dimension.
 
 Consequence: the descriptive statistical resilience definition is now two-dimensional. Neural integration remains unauthorized until a separate study chooses and validates vector supervision, multi-task targets, or event-process objectives.
+## Rejected stage gate: E-L4-1 training after E-L4-0 audit (2026-07-15)
+Decision: do not start indirect L4 neural forecasting yet.
+Reasons:
+1. Current window-start splits overlap targets across train/validation and validation/test.
+2. Current scaler fitting reaches into validation targets.
+3. Typhoon's fixed 16-node paired subnet cannot be explicitly selected by the suffix-only loader.
+4. Current checkpoints are insufficient for auditable physical-space inverse transformation.
+5. Current evaluation does not export timestamp-aligned predictions.
+6. Existing experiment commands include event/weather features prohibited by the preregistered baseline.
+
+Consequence: preserve the two-dimensional L4 statistical definition and keep model.py and the training loss frozen. A separate minimal pipeline-repair stage must fix splitting, explicit node selection, scaler/checkpoint metadata, event-free configuration and prediction export. Only after that repair passes the same audit may E-L4-1 training begin.
