@@ -21,3 +21,22 @@ Reasons:
 5. Rainstorm has poor multi-initialization latent-state agreement, even though blocked-fold loading signs are stable.
 6. Occupancy communalities near 1 on PEMS indicate that the factor is dominated by occupancy rather than a balanced universal performance construct.
 Consequence: do not add L3 labels, auxiliary heads, CVaR, uncertainty weighting, conformal prediction, graph gates, or other network complexity. Keep Bridge as a flow-only service proxy and Typhoon speed-only as the strongest current event-performance signal. A future L4 study may separate demand level from operating efficiency, but L4 was not implemented in this stage.
+## Supported with restriction: L4 demand/service and operating-efficiency dimensions (2026-07-15)
+Accepted:
+1. Traffic resilience should be described with separate demand/service-volume and operating-efficiency processes.
+2. Flow lower-tail deficit is a demand/service-volume signal, not a universal efficiency loss.
+3. Speed lower-tail deficit is the current core operating-efficiency signal.
+4. Event interpretation uses both-high, demand-only, efficiency-only, and neither states.
+5. Peak, cumulative deficit, duration, and recovery are reported separately for each dimension.
+
+Evidence:
+- Rainstorm is mainly both-high, explaining why both flow and speed were informative.
+- Typhoon is mainly efficiency-only, explaining why speed worked while flow-only failed.
+- All three Typhoon efficiency effects are positive without moving event windows or lag.
+
+Restricted/rejected:
+- Do not automatically add occupancy to the core efficiency definition. Although speed/occupancy loadings are bootstrap-stable, PEMS test high-state calibration worsens.
+- Do not combine demand and efficiency into a weighted scalar L4 score.
+- Do not treat Bridge as evidence for an efficiency dimension.
+
+Consequence: the descriptive statistical resilience definition is now two-dimensional. Neural integration remains unauthorized until a separate study chooses and validates vector supervision, multi-task targets, or event-process objectives.

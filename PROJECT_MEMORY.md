@@ -7,12 +7,13 @@ Unknown-disruption traffic resilience prediction under event-scarce training dat
 DGCN-style dynamic graph + STSGCN-style synchronous convolution + existing quality fusion. Do not add graph gates, OOD scales, weather/event graphs, CVaR, or resilience heads until the statistical target is validated.
 
 ## Current statistical decision
-Flow-only remains valid as a Bridge service proxy, both flow and speed are informative for Rainstorm, and speed-only remains the strongest Typhoon signal. Universal flow-only, P3b softmax, and the L3 one-factor latent performance definition are rejected as universal labels.
+The supported statistical definition is two-dimensional: demand/service-volume deficit from flow and operating-efficiency deficit from speed, reported separately with event quadrants and separate recovery processes. Universal flow-only, P3b, L3 one-factor, scalar L4 recombination, and automatic occupancy inclusion are rejected or restricted.
 
 ## Authoritative outputs
 - D:\TrafficGNN\outputs\statistical_resilience_profile_n41
 - D:\TrafficGNN\outputs\flow_speed_resilience_analysis
 - D:\TrafficGNN\outputs\latent_traffic_performance_l3
+- D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4
 
 ## Important corrected facts
 - PEMS test high-state rates: P3b PEMS04 6.50%, PEMS08 17.11%; speed-only PEMS04 8.77%, PEMS08 13.58%.
@@ -21,7 +22,7 @@ Flow-only remains valid as a Bridge service proxy, both flow and speed are infor
 - Bridge has one observed modality and cannot independently identify a full one-factor measurement model.
 
 ## Next step
-Stop before neural-network integration. If a new statistical study is approved, preregister L4 with separate demand-level and operating-efficiency factors. Do not modify the neural network yet.
+The offline descriptive definition is complete. Stop before neural-network integration. A new preregistered study must choose whether the network should predict a vector state, use multi-task supervision, or optimize event-process objectives.
 ## Git workflow
 1. Before editing code, inspect `git status` and preserve unrelated user changes.
 2. Complete one coherent task, run the relevant compilation and tests, and inspect the diff before committing.
@@ -39,3 +40,21 @@ The missing-data one-factor implementation, posterior variance, train-only laten
 - Rainstorm initialization posterior agreement falls to about 0.3898, and the single factor learns stable negative flow loadings versus positive speed loadings.
 
 Do not connect L3 to the neural network. Keep the architecture and training loss frozen. If research continues, preregister L4 as two separate factors (demand level and operating efficiency); do not implement L4 automatically.
+## L4 two-dimension completed decision (2026-07-15)
+The preregistered L4 study is complete. Traffic resilience is supported as a two-dimensional statistical description rather than one universal scalar:
+- demand/service-volume state: flow conditional lower-tail deficit, interpreted as unusually low realized service volume or demand rather than operating efficiency;
+- operating-efficiency state: speed conditional lower-tail deficit, with flow prohibited from entering this dimension.
+
+Event quadrants resolve the previous contradiction. Rainstorm is predominantly both demand/service and efficiency loss (92.83% both-high during the main segment). Typhoon is predominantly efficiency-only loss: 40.08%, 40.51%, and 34.60% across its three segments, while demand-only/both-high rates are much smaller. Rainstorm efficiency delta is 0.9463. Typhoon efficiency deltas are positive in all three segments (0.5274, 0.5296, 0.4051).
+
+The PEMS speed+reversed-occupancy efficiency extension is restricted/rejected for the core definition. Its bootstrap loadings are stable and positive, but test high-state rates deteriorate to 15.77% on PEMS04 and 17.13% on PEMS08, compared with speed-only 7.78% and 12.74%. Stable loadings do not override normal-state calibration failure.
+
+Current recommended statistical definition:
+1. report demand/service-volume deficit and operating-efficiency deficit separately;
+2. report both-high, demand-only, efficiency-only, and neither event states;
+3. compute peak, cumulative loss, duration, and recovery separately by dimension;
+4. Bridge remains demand/service-volume only;
+5. occupancy remains an auxiliary diagnostic, not a universal core efficiency input;
+6. do not create a weighted scalar L4 score.
+
+This completes the offline definition study at the descriptive statistical level, but does not authorize neural-network integration. A separate preregistered study is required to choose vector supervision, multi-task learning, or event-process objectives.

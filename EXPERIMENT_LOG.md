@@ -27,3 +27,15 @@ Results:
 - PEMS08 L3 test high-state 18.70% versus L2 15.15%.
 - Rainstorm minimum initialization posterior correlation with the best solution was 0.3898.
 Decision: reject L3 and do not run neural-network experiments.
+## L4 demand-efficiency N41 study (2026-07-15)
+Protocol commit: e01dadc
+Output: D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4
+Configuration: five datasets, max_nodes=41, factor seeds 1,7,21,42,100, moving-block bootstrap=1000, block_length=12.
+Engineering: compilation passed; 15 new L4 tests passed; all previous 79 tests continued to pass (94 unittest total). Five-node/100-bootstrap smoke and N41/1000-bootstrap diagnostics completed. No neural-network experiment was run.
+Results:
+- Bridge demand/service proxy retained; efficiency unavailable and not fabricated.
+- Rainstorm efficiency delta 0.9463. Main event quadrant: both-high 92.83%, demand-only 7.17%.
+- Typhoon efficiency segment deltas: 0.5274, 0.5296, 0.4051. Efficiency-only quadrant rates: 40.08%, 40.51%, 34.60%.
+- PEMS04 efficiency factor loadings: speed 0.3198, reversed occupancy 0.6348; test high-state 15.77% versus speed-only 7.78%.
+- PEMS08 efficiency factor loadings: speed 0.4766, reversed occupancy 0.6366; test high-state 17.13% versus speed-only 12.74%.
+Decision: support the two-dimension demand/efficiency framework, restrict the occupancy extension, prohibit scalar recombination, and keep neural integration frozen.
