@@ -167,6 +167,8 @@ def strict_data_bundle(
     horizon: int,
     train_ratio: float = 0.6,
     val_ratio: float = 0.2,
+    train_time_end_exclusive: int | None = None,
+    val_time_end_exclusive: int | None = None,
 ) -> dict[str, object]:
     """Build strict splits, train-only scaling and aligned target timestamps."""
     array = np.asarray(values, dtype=float)
@@ -174,7 +176,13 @@ def strict_data_bundle(
     if len(array) != len(ts):
         raise ValueError("values and timestamps lengths differ")
     train, val, test, info = split_traffic_window_indices_strict(
-        len(array), history, horizon, train_ratio, val_ratio
+        len(array),
+        history,
+        horizon,
+        train_ratio,
+        val_ratio,
+        train_time_end_exclusive,
+        val_time_end_exclusive,
     )
     scaler, scaled = fit_train_only_scaler(array, int(info["train_time_end_exclusive"]))
     offsets = np.arange(history, history + horizon, dtype=int)

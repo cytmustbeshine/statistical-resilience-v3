@@ -354,6 +354,27 @@ class TestL4PredictionPipeline(unittest.TestCase):
         self.assertTrue(bundle["split_info"]["target_disjoint"])
         self.assertEqual(bundle["scaler_metadata"]["type"], "StandardScaler")
 
+    def test_strict_bundle_accepts_frozen_profile_boundaries(self):
+        values = np.arange(240.0).reshape(120, 2, 1)
+        timestamps = np.arange(120).astype("datetime64[m]")
+        bundle = strict_data_bundle(
+            values,
+            timestamps,
+            history=4,
+            horizon=3,
+            train_time_end_exclusive=70,
+            val_time_end_exclusive=95,
+        )
+        info = bundle["split_info"]
+        self.assertEqual(info["train_time_end_exclusive"], 70)
+        self.assertEqual(info["val_time_end_exclusive"], 95)
+        self.assertTrue(info["target_disjoint"])
+        train_targets = set(bundle["train_target_timestamps"].reshape(-1).tolist())
+        val_targets = set(bundle["val_target_timestamps"].reshape(-1).tolist())
+        test_targets = set(bundle["test_target_timestamps"].reshape(-1).tolist())
+        self.assertFalse(train_targets & val_targets)
+        self.assertFalse(val_targets & test_targets)
+
     def test_event_free_feature_contract(self):
         contract = event_free_feature_contract()
         self.assertEqual(contract["input_features"], ["traffic"])

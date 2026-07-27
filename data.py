@@ -136,6 +136,8 @@ def split_traffic_window_indices_strict(
     horizon: int,
     train_ratio: float = 0.6,
     val_ratio: float = 0.2,
+    train_time_end_exclusive: int | None = None,
+    val_time_end_exclusive: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
     """Build target-disjoint chronological forecasting-window splits.
 
@@ -164,8 +166,18 @@ def split_traffic_window_indices_strict(
     windows = np.arange(num_windows, dtype=int)
     target_start = windows + history
     target_end = target_start + horizon - 1
-    train_time_end = int(num_timesteps * train_ratio)
-    val_time_end = int(num_timesteps * (train_ratio + val_ratio))
+    train_time_end = (
+        int(num_timesteps * train_ratio)
+        if train_time_end_exclusive is None
+        else int(train_time_end_exclusive)
+    )
+    val_time_end = (
+        int(num_timesteps * (train_ratio + val_ratio))
+        if val_time_end_exclusive is None
+        else int(val_time_end_exclusive)
+    )
+    if not (0 < train_time_end < val_time_end < num_timesteps):
+        raise ValueError("explicit raw-time split boundaries must satisfy 0 < train < val < time")
     train = windows[target_end < train_time_end]
     val = windows[(target_start >= train_time_end) & (target_end < val_time_end)]
     test = windows[(target_start >= val_time_end) & (target_end < num_timesteps)]

@@ -71,3 +71,20 @@ Verification commands/results:
 - Audit decision: `stage_a_passed=true`, `e_l4_1_authorized=true`, `blockers=[]`, `model_py_modified=false`, `training_run=false`.
 
 Outputs refreshed in `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline`: prediction pipeline audit, dataset capability, node alignment, split-window, scaler roundtrip, UTF-8 Chinese report and decision JSON. Outputs and temporary smoke artifacts are not committed.
+## E-L4-1 five-node smoke training (2026-07-27)
+Command: `D:\soft\Python310\python.exe run_l4_prediction_baseline.py --datasets rainstorm,typhoon,pems04 --max-nodes 5 --seed 42 --epochs 2 --max-train-windows 512 --max-eval-windows 256 --device cuda`.
+
+Environment: PyTorch 2.8.0+cu128; NVIDIA GeForce RTX 4060; event/weather features disabled; occupancy excluded; no resilience head, CVaR or uncertainty weighting. Flow and speed were trained independently.
+
+A pre-training frozen-profile compatibility check initially stopped Rainstorm before optimizer execution because strict raw-row boundaries differed from the frozen profile boundary by two steps. The pipeline was repaired to accept explicit frozen raw-time boundaries while retaining target-disjoint windows. Verified profile/scaler boundaries: Rainstorm 7255, Typhoon 2590, PEMS04 10193. No profile was refitted.
+
+Smoke traffic MAE versus persistence MAE:
+- Rainstorm flow: 111.9790 vs 40.9081; speed: 6.8794 vs 5.0503.
+- Typhoon flow: 34.2156 vs 6.1199; speed: 5.1989 vs 3.9152.
+- PEMS04 flow: 79.0615 vs 39.5232; speed: 3.0557 vs 1.9697.
+
+L4 system-deficit MAE: Rainstorm demand 0.9544, efficiency 0.6840; Typhoon demand 1.2379, efficiency 0.9591; PEMS04 demand 0.4964, efficiency 0.8321. Only Typhoon efficiency had a positive smoke Spearman correlation (0.1828); the remaining correlations were negative. These numbers are pipeline diagnostics only because training was intentionally capped at two epochs and 512 windows.
+
+Artifacts: `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\smoke`, `e_l4_1_smoke_metrics.csv`, `e_l4_1_smoke_report.md`, and `e_l4_1_smoke_decision.json`. Checkpoints and NPZ predictions remain outside Git.
+
+Verification: compilation passed; 135 unittest tests passed (16 profile + 22 flow-speed + 41 L3 + 15 L4 + 36 pipeline + 5 prediction evaluation). `pytest` is unavailable (`No module named pytest`). E-L4-0R re-audit passed after the boundary extension.

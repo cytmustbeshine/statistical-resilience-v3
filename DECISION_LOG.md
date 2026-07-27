@@ -65,3 +65,22 @@ Accepted evidence:
 7. Compilation, 129 unittest tests and the five-dataset N41 repair audit passed with no blockers.
 
 Boundary of this acceptance: no neural-network training has occurred, so this does not establish that DGCN-STSGCN predicts flow, speed or L4 resilience well. It authorizes only the preregistered event-free, single-seed, five-node E-L4-1 smoke training. The L4 statistical profiles remain frozen; `model.py`, architecture and loss remain frozen; full N41 and three-seed experiments require the smoke stage to pass first.
+## Engineering-accepted, scientifically unresolved: E-L4-1 five-node smoke (2026-07-27)
+Decision: accept the end-to-end engineering smoke, but do not accept neural L4 predictive validity from this run.
+
+Accepted engineering evidence:
+1. Six independent flow/speed DSTSGCN smoke models trained without event or weather input.
+2. Frozen L4 split boundaries were reused exactly; validation/test data did not refit scalers or profiles.
+3. Strict train/validation/test targets remain disjoint.
+4. Typhoon uses five nodes drawn from the fixed 16-node matched subnet, with demand-profile indices 25-29 correctly preserved.
+5. Checkpoint and prediction NPZ roundtrips passed, timestamps aligned and physical-space predictions were finite.
+6. Frozen demand and efficiency postprocessing ran for truth and predictions using the same profile and train thresholds.
+7. 135 unittest tests and the E-L4-0R re-audit passed.
+
+Not accepted as predictive evidence:
+1. All six two-epoch neural traffic forecasts were worse than persistence MAE.
+2. Five of six L4 deficit Spearman correlations were negative; Typhoon efficiency was only weakly positive.
+3. Some demand high-state predictions collapsed to no alarms in the smoke subset.
+4. The capped smoke sample and two epochs are intentionally insufficient for model comparison.
+
+Consequence: do not write that DGCN-STSGCN predicts L4 resilience. A single-seed, fully trained and preregistered E-L4-1 baseline may be run next to distinguish undertraining from a real forecasting failure. Three-seed experiments, auxiliary resilience supervision, network changes and loss changes remain prohibited until that formal baseline passes its own stage gate.
