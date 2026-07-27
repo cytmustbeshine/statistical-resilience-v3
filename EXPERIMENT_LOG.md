@@ -103,3 +103,11 @@ Traffic MAE versus persistence:
 The nine continuous L4 deficit Spearman correlations were all positive: 0.5523, 0.6116, 0.7672, 0.9114, 0.7728, 0.6501, 0.8141, 0.6688 and 0.7896 in the output row order. Formal output: `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\formal_n41`, plus `e_l4_1_formal_n41_metrics.csv`, `e_l4_1_formal_n41_report.md` and `e_l4_1_formal_n41_decision.json`.
 
 Verification after the formal run: compilation passed and 135 unittest tests passed. pytest remains unavailable in the configured Python environment.
+## E-L4-1E event-level L4 evaluation (2026-07-27)
+Command: `D:\soft\Python310\python.exe evaluate_l4_event_prediction.py --datasets bridge,rainstorm,typhoon,pems04,pems08 --prediction-dir D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\formal_n41 --output-dir D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\event_evaluation --bootstrap-repetitions 1000 --block-length 12 --seed 42`.
+
+The evaluator reused frozen train-only L4 profiles, train q90/q99 thresholds and q50/q75/q90 recovery sensitivity. It used the original Bridge explicit event, Rainstorm event signal and three Typhoon event segments. PEMS04/PEMS08 were normal-state diagnostics only. Outputs include event comparison, process, state, recovery, sensitivity and persistence CSV files plus UTF-8 report and decision JSON.
+
+Key results: Rainstorm demand/efficiency event means were 2.1434/2.4939 versus non-event 0.8502/0.6680; both-high accuracy was 0.8630. Typhoon efficiency-only accuracy was 0.8542 and 0.8415 for observable windows 1 and 2. Bridge demand high-state precision/recall were both 0. Typhoon window 0 had no formal test targets and was marked unavailable. Rainstorm demand peak timing error was 16.25 hours; efficiency was 0.67 hours. Observable Typhoon peak errors were 0.17-1.00 hours.
+
+Verification: event evaluator compilation passed; 5 event tests passed; previous 135 tests also passed; total unittest count is 140. No pytest run because pytest is not installed.

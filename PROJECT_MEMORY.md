@@ -99,3 +99,14 @@ All nine model runs completed with finite physical predictions, aligned target t
 Traffic MAE beat persistence for Rainstorm speed, Typhoon flow, Typhoon speed and PEMS04 speed, but not Bridge flow, Rainstorm flow, PEMS04 flow or either PEMS08 variable. All nine system L4 deficit Spearman correlations were positive: Bridge 0.5523; Rainstorm flow/speed 0.6116/0.7672; Typhoon flow/speed 0.9114/0.7728; PEMS04 flow/speed 0.6501/0.8141; PEMS08 flow/speed 0.6688/0.7896.
 
 Decision boundary: the complete baseline establishes that indirect L4 prediction is technically executable and that several dimensions have positive continuous-deficit association, but it does not establish universal forecasting superiority over persistence or complete event-level resilience prediction. No three-seed experiment, auxiliary resilience supervision, network change or loss change is authorized yet. Formal event-segment, peak/recovery and block-bootstrap evaluation remains required before accepting E-L4-1 scientifically.
+## E-L4-1E event-level evaluation decision (2026-07-27)
+Event-level evaluation was completed from the saved formal N41 predictions. No model was retrained, no event window was moved, no L4 profile or threshold was refit, and no three-seed or auxiliary-head experiment was run. Duplicate forecast-origin/horizon predictions for the same target timestamp were averaged before evaluation.
+
+Frozen event windows recovered by the existing event logic: Bridge one explicit window (raw 4032-4158), Rainstorm one signal-defined window (10394-10630), and Typhoon three signal-defined windows (3194-3430, 3482-3718, 3770-4006). Typhoon window 0 is outside the formal test prediction timestamps and is explicitly marked unavailable rather than imputed.
+
+Layered conclusion:
+1. Definition layer: supported with Bridge restriction. Rainstorm demand and efficiency event means are well above non-event values, and both-high accuracy is about 0.863. Typhoon observed windows 1 and 2 have efficiency-only classification accuracy about 0.854 and 0.841. Bridge flow-only proxy did not identify a high-state event in this prediction slice, which does not invalidate the multi-variable L4 definition.
+2. Variable prediction layer: mixed. Some formal N41 flow/speed models beat persistence, others do not.
+3. Event-process layer: partially successful. Rainstorm efficiency peak timing error is about 0.67 hours, while demand peak timing error is about 16.25 hours. Observable Typhoon peak timing errors are at most 1 hour, with recovery correspondence about 0.43-0.90; some recoveries are censored by the available prediction window.
+
+E-L4-1 is therefore restricted provisional evidence for indirect event-level L4 prediction, not a universally accepted neural resilience predictor. Keep L4 frozen. Do not run three seeds or add an auxiliary resilience head. The detailed event outputs are under `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\event_evaluation`.

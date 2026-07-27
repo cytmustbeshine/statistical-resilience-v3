@@ -103,3 +103,13 @@ Evidence limiting scientific acceptance:
 4. Positive continuous L4 correlation alone does not establish event-level resilience prediction or causal understanding.
 
 Consequence: retain the frozen two-dimensional L4 definition and the frozen network/loss. Do not run three seeds or add an auxiliary resilience head yet. The next required analysis is event-process and baseline comparison evaluation using the saved full-N41 predictions, followed by a pre-registered decision on whether E-L4-1 is scientifically accepted.
+## Restricted provisional result: E-L4-1E event evaluation (2026-07-27)
+Decision: retain the frozen L4 definition and classify neural indirect prediction as restricted provisional evidence, not universal acceptance.
+
+Definition layer: supported with Bridge flow-only restriction. Rainstorm preserves the expected two-dimensional event pattern; Typhoon observable segments preserve efficiency-dominant behavior. The Bridge prediction miss is treated as a limitation of the flow-only external proxy/prediction slice, not as evidence to collapse L4 into another definition.
+
+Variable prediction layer: mixed. The formal N41 models do not uniformly beat persistence.
+
+Event-process layer: partially successful. Rainstorm efficiency timing and Typhoon observable timing are useful, but Rainstorm demand timing is poor, Bridge high-state is missed, and some recovery statuses are censored. The first Typhoon segment is unavailable in the formal test horizon and is not filled or treated as a success.
+
+Consequence: do not run three seeds, do not add a resilience auxiliary head, do not modify the network or loss, and do not reject L4. Keep the result out of the paper as a claim of complete neural resilience learning. Any later work must be separately preregistered and should first address event-process limitations or compare a vector/multi-task objective without changing the current conclusion retroactively.
