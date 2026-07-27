@@ -88,3 +88,18 @@ L4 system-deficit MAE: Rainstorm demand 0.9544, efficiency 0.6840; Typhoon deman
 Artifacts: `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\smoke`, `e_l4_1_smoke_metrics.csv`, `e_l4_1_smoke_report.md`, and `e_l4_1_smoke_decision.json`. Checkpoints and NPZ predictions remain outside Git.
 
 Verification: compilation passed; 135 unittest tests passed (16 profile + 22 flow-speed + 41 L3 + 15 L4 + 36 pipeline + 5 prediction evaluation). `pytest` is unavailable (`No module named pytest`). E-L4-0R re-audit passed after the boundary extension.
+## E-L4-1 formal N41 baseline (2026-07-27)
+Command: `D:\soft\Python310\python.exe run_l4_prediction_baseline.py --run-tag formal_n41 --datasets bridge,rainstorm,typhoon,pems04,pems08 --max-nodes 41 --history 12 --horizon 12 --epochs 20 --batch-size 64 --hidden-dim 64 --num-blocks 2 --max-train-windows 0 --max-eval-windows 0 --seed 42 --device cuda`.
+
+The run trained 9 models: Bridge flow; Rainstorm flow/speed; Typhoon flow/speed on the fixed 16-node matched subnet; PEMS04 flow/speed; PEMS08 flow/speed. Full strict windows used: Bridge 3,085/1,021/1,033 train/validation/test; Rainstorm 7,232/2,404/2,415; Typhoon 2,567/848/860; PEMS04 10,170/3,383/3,394; PEMS08 10,688/3,556/3,567 per variable.
+
+Traffic MAE versus persistence:
+- Bridge flow: 38.0659 vs 35.5208 (worse).
+- Rainstorm flow/speed: 38.3059 vs 36.6612 (worse); 5.0076 vs 5.7574 (better).
+- Typhoon flow/speed: 9.9867 vs 10.2149 (better); 3.5407 vs 3.7871 (better).
+- PEMS04 flow/speed: 34.0178 vs 33.5419 (worse); 2.1794 vs 2.1948 (slightly better).
+- PEMS08 flow/speed: 30.8721 vs 29.9787 (worse); 2.5295 vs 2.4798 (worse).
+
+The nine continuous L4 deficit Spearman correlations were all positive: 0.5523, 0.6116, 0.7672, 0.9114, 0.7728, 0.6501, 0.8141, 0.6688 and 0.7896 in the output row order. Formal output: `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\formal_n41`, plus `e_l4_1_formal_n41_metrics.csv`, `e_l4_1_formal_n41_report.md` and `e_l4_1_formal_n41_decision.json`.
+
+Verification after the formal run: compilation passed and 135 unittest tests passed. pytest remains unavailable in the configured Python environment.

@@ -84,3 +84,22 @@ Not accepted as predictive evidence:
 4. The capped smoke sample and two epochs are intentionally insufficient for model comparison.
 
 Consequence: do not write that DGCN-STSGCN predicts L4 resilience. A single-seed, fully trained and preregistered E-L4-1 baseline may be run next to distinguish undertraining from a real forecasting failure. Three-seed experiments, auxiliary resilience supervision, network changes and loss changes remain prohibited until that formal baseline passes its own stage gate.
+## E-L4-1 formal N41 baseline: technically valid, scientifically provisional (2026-07-27)
+Decision: accept the complete single-seed N41 run as a valid engineering baseline, but do not accept it as proof that the network universally predicts L4 resilience better than persistence.
+
+Evidence supporting technical validity:
+1. Nine expected models completed without NaN/Inf prediction failure.
+2. Checkpoints and multi-horizon NPZ archives reloaded successfully.
+3. Target timestamps aligned with all forecast horizons.
+4. Frozen train-only L4 profiles and thresholds were reused for truth and prediction.
+5. Bridge produced no fabricated efficiency output.
+6. All nine L4 continuous deficit Spearman correlations were positive.
+7. 135 unittest tests and compilation passed.
+
+Evidence limiting scientific acceptance:
+1. Four of nine traffic-variable forecasts were better than persistence; five were worse.
+2. PEMS08 flow and speed did not beat persistence.
+3. This run has one seed and does not include event-segment bootstrap, peak timing, recovery correspondence or formal four-state event evaluation.
+4. Positive continuous L4 correlation alone does not establish event-level resilience prediction or causal understanding.
+
+Consequence: retain the frozen two-dimensional L4 definition and the frozen network/loss. Do not run three seeds or add an auxiliary resilience head yet. The next required analysis is event-process and baseline comparison evaluation using the saved full-N41 predictions, followed by a pre-registered decision on whether E-L4-1 is scientifically accepted.

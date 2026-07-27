@@ -50,14 +50,14 @@ def collect_predictions(model, loader, static_adj, device):
     return np.concatenate(truth), np.concatenate(prediction)
 
 
-def model_for_smoke(num_nodes, horizon, hidden_dim):
+def model_for_baseline(num_nodes, horizon, hidden_dim, num_blocks):
     return DSTSGCN(
         num_nodes=num_nodes,
         input_dim=1,
         output_dim=1,
         horizon=horizon,
         hidden_dim=hidden_dim,
-        num_blocks=1,
+        num_blocks=num_blocks,
         num_heads=4,
         dropout=0.1,
         graph_learner_type="lmln",
@@ -185,7 +185,7 @@ def train_one(dataset, variable, args):
     device = args.device
     static_adj = torch.tensor(adjacency_np, dtype=torch.float32, device=device)
     set_seed(args.seed)
-    model = model_for_smoke(len(prepared["model_names"]), args.horizon, args.hidden_dim).to(device)
+    model = model_for_baseline(len(prepared["model_names"]), args.horizon, args.hidden_dim, args.num_blocks).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     loss_fn = nn.HuberLoss()
     raw_mean = float(np.asarray(bundle["scaler"].mean).reshape(-1)[0])
@@ -213,7 +213,7 @@ def train_one(dataset, variable, args):
     if best_state is None:
         raise RuntimeError("no finite validation checkpoint was produced")
 
-    run_dir = Path(args.output_dir) / "smoke" / dataset / variable
+    run_dir = Path(args.output_dir) / args.run_tag / dataset / variable
     checkpoint_path = run_dir / "best_dstsgcn.pt"
     contract = event_free_feature_contract()
     metadata = {
@@ -231,7 +231,7 @@ def train_one(dataset, variable, args):
         "input_features": contract["input_features"],
         "event_features": contract["event_features"],
         "weather_features": contract["weather_features"],
-        "model_config": {"hidden_dim": args.hidden_dim, "num_blocks": 1, "graph_learner_type": "lmln", "fusion_type": "quality"},
+        "model_config": {"hidden_dim": args.hidden_dim, "num_blocks": args.num_blocks, "graph_learner_type": "lmln", "fusion_type": "quality"},
         "smoke_limits": {"train_windows": len(train_indices), "validation_windows": len(val_indices), "test_windows": len(test_indices)},
     }
     save_forecast_checkpoint(checkpoint_path, best_state, metadata)
@@ -322,8 +322,9 @@ def run(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for dataset in [item.strip() for item in args.datasets.split(",") if item.strip()]:
-        for variable in ("flow", "speed"):
-            print(f"[E-L4-1 smoke] {dataset}/{variable}", flush=True)
+        variables = ("flow",) if dataset == "bridge" else ("flow", "speed")
+        for variable in variables:
+            print(f"[E-L4-1 {args.run_tag}] {dataset}/{variable}", flush=True)
             results.append(train_one(dataset, variable, args))
             latest = results[-1]
             print(
@@ -353,32 +354,36 @@ def run(args):
             "target_timestamp_aligned": result["target_timestamp_aligned"],
         })
     summary = pd.DataFrame(rows)
-    summary.to_csv(output_dir / "e_l4_1_smoke_metrics.csv", index=False, encoding="utf-8-sig")
+    summary.to_csv(output_dir / f"e_l4_1_{args.run_tag}_metrics.csv", index=False, encoding="utf-8-sig")
+    dataset_names = [item.strip() for item in args.datasets.split(",") if item.strip()]
+    expected_count = sum(1 if dataset == "bridge" else 2 for dataset in dataset_names)
     passed = bool(
-        len(results) == 6
+        len(results) == expected_count
         and summary[["finite_predictions", "finite_l4_postprocess", "target_timestamp_aligned"]].all().all()
         and all(result["checkpoint_roundtrip"] and result["prediction_archive_roundtrip"] for result in results)
     )
     decision = {
-        "stage": "E-L4-1-smoke",
-        "smoke_passed": passed,
-        "datasets": [item.strip() for item in args.datasets.split(",") if item.strip()],
+        "stage": "E-L4-1-" + args.run_tag,
+        "stage_passed": passed,
+        "smoke_passed": passed if args.run_tag == "smoke" else None,
+        "datasets": dataset_names,
+        "expected_model_count": expected_count,
         "max_nodes": args.max_nodes,
         "seed": args.seed,
         "epochs": args.epochs,
         "training_run": True,
-        "full_n41_authorized": passed,
+        "full_n41_authorized": passed if args.run_tag == "smoke" else None,
         "three_seed_authorized": False,
         "model_py_modified": False,
         "loss_definition_modified": False,
     }
-    (output_dir / "e_l4_1_smoke_decision.json").write_text(json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (output_dir / f"e_l4_1_{args.run_tag}_decision.json").write_text(json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = [
-        "# E-L4-1 五节点预测 Smoke Test",
+        f"# E-L4-1 {args.run_tag} 预测基线",
         "",
         "## 阶段结论",
         "",
-        "**Smoke test 通过。**" if passed else "**Smoke test 未通过，停止后续实验。**",
+        "**工程阶段运行通过。**" if passed else "**工程阶段运行未通过，停止后续实验。**",
         "",
         "本轮分别训练 flow 与 speed 单变量模型，只使用历史交通变量。没有使用事件、天气、occupancy、韧性辅助头、CVaR 或不确定性加权，也没有修改网络骨架和损失定义。",
         "",
@@ -397,9 +402,9 @@ def run(args):
         "",
         "## 结论边界",
         "",
-        "本结果只验证小规模训练、checkpoint、反标准化、时间对齐和冻结 L4 后处理能够端到端运行，不用于论文效果结论。即使通过，也不能声称神经网络已经学会完整交通韧性。",
+        ("本结果来自完整 N41、单种子、20 epochs 基线，支持对普通交通预测和间接 L4 缺失预测进行初步评价；尚未进行多种子稳定性、事件级 bootstrap 或正式论文结论。不能声称神经网络已经学会完整交通韧性。" if args.run_tag == "formal_n41" else "本结果只验证小规模训练、checkpoint、反标准化、时间对齐和冻结 L4 后处理能够端到端运行，不用于论文效果结论。即使通过，也不能声称神经网络已经学会完整交通韧性。"),
     ]
-    (output_dir / "e_l4_1_smoke_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (output_dir / f"e_l4_1_{args.run_tag}_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps(decision, ensure_ascii=False), flush=True)
     return decision
 
@@ -413,13 +418,15 @@ def parse_args():
     parser.add_argument("--max-nodes", type=int, default=5)
     parser.add_argument("--history", type=int, default=12)
     parser.add_argument("--horizon", type=int, default=12)
-    parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--hidden-dim", type=int, default=32)
+    parser.add_argument("--run-tag", default="smoke")
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--hidden-dim", type=int, default=64)
+    parser.add_argument("--num-blocks", type=int, default=2)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--max-train-windows", type=int, default=512)
-    parser.add_argument("--max-eval-windows", type=int, default=256)
+    parser.add_argument("--max-train-windows", type=int, default=0)
+    parser.add_argument("--max-eval-windows", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return parser.parse_args()
 
