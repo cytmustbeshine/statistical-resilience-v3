@@ -110,3 +110,11 @@ Layered conclusion:
 3. Event-process layer: partially successful. Rainstorm efficiency peak timing error is about 0.67 hours, while demand peak timing error is about 16.25 hours. Observable Typhoon peak timing errors are at most 1 hour, with recovery correspondence about 0.43-0.90; some recoveries are censored by the available prediction window.
 
 E-L4-1 is therefore restricted provisional evidence for indirect event-level L4 prediction, not a universally accepted neural resilience predictor. Keep L4 frozen. Do not run three seeds or add an auxiliary resilience head. The detailed event outputs are under `D:\TrafficGNN\outputs\e_l4_1_resilience_prediction_baseline\event_evaluation`.
+## E-L4-2A corrected final-protocol audit (2026-07-28)
+The original E-L4-2A decision was corrected after adding explicit event/test coverage to the strict split audit. Although target timestamps remain disjoint, scalers and frozen profiles remain train-only, inputs exclude event/weather variables, Typhoon node matching remains fixed at 16, and both model smoke shapes are `(2,12,5,1)`, the default 80% validation/test boundary does not satisfy the preregistered final event-evaluation contract.
+
+Bridge uses `val_end=4147` while its fixed event is 4032-4158, so 0/1 events are fully in the test target period. Typhoon uses `val_end=3456` while its first fixed event is 3194-3430, so only 2/3 events are fully in test. Rainstorm passes with 1/1. The corrected stage decision is `stage_passed=false` and `e_l4_2b_authorized=false`.
+
+A formal run had already started under the erroneous pass and was stopped immediately when the mismatch was found. It completed 24/60 neural tasks; these files remain under `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\formal` only as invalid partial audit evidence and must not be used for scientific comparison or a paper claim. No A3-L4, L4-auxiliary, or CVaR conclusion is accepted.
+
+The next permitted step is a separate E-L4-2A-R repair. Pre-register validation end boundaries Bridge=4032, Rainstorm=9676, Typhoon=3194; verify strict target non-overlap, train-only scaler/profile compatibility, and full event test coverage; then rerun Stage A. L4 remains frozen and no model/loss change is authorized before that gate passes.

@@ -48,6 +48,8 @@ from l4_prediction_pipeline import (
 )
 
 
+from audit_final_l4_a3_alignment import EVENT_WINDOWS, audit_event_test_coverage
+
 class TestL4PredictionPipeline(unittest.TestCase):
     def test_split_windows_do_not_cross_boundaries(self):
         train, val, test, bounds = strict_chronological_window_splits(100, 4, 3)
@@ -384,5 +386,18 @@ class TestL4PredictionPipeline(unittest.TestCase):
         self.assertFalse(contract["cvar_enabled"])
         self.assertFalse(contract["scalar_l4_target"])
 
+
+class FinalProtocolEventCoverageTests(unittest.TestCase):
+    def test_default_split_does_not_cover_all_preregistered_events(self):
+        bridge = audit_event_test_coverage(EVENT_WINDOWS["bridge"], 4147)
+        typhoon = audit_event_test_coverage(EVENT_WINDOWS["typhoon"], 3456)
+        self.assertFalse(all(item["fully_in_test"] for item in bridge))
+        self.assertEqual(sum(item["fully_in_test"] for item in typhoon), 2)
+
+    def test_recommended_boundaries_cover_all_events(self):
+        boundaries = {"bridge": 4032, "rainstorm": 9676, "typhoon": 3194}
+        for dataset, boundary in boundaries.items():
+            coverage = audit_event_test_coverage(EVENT_WINDOWS[dataset], boundary)
+            self.assertTrue(all(item["fully_in_test"] for item in coverage))
 if __name__ == "__main__":
     unittest.main()

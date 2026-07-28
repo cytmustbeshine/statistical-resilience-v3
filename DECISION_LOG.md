@@ -113,3 +113,9 @@ Variable prediction layer: mixed. The formal N41 models do not uniformly beat pe
 Event-process layer: partially successful. Rainstorm efficiency timing and Typhoon observable timing are useful, but Rainstorm demand timing is poor, Bridge high-state is missed, and some recovery statuses are censored. The first Typhoon segment is unavailable in the formal test horizon and is not filled or treated as a success.
 
 Consequence: do not run three seeds, do not add a resilience auxiliary head, do not modify the network or loss, and do not reject L4. Keep the result out of the paper as a claim of complete neural resilience learning. Any later work must be separately preregistered and should first address event-process limitations or compare a vector/multi-task objective without changing the current conclusion retroactively.
+## Rejected stage gate: corrected E-L4-2A final event coverage (2026-07-28)
+Decision: reject entry to E-L4-2B under the current default 80% validation/test boundaries.
+
+Reason: strict split leakage checks alone are insufficient for the preregistered event comparison. Bridge's fixed event begins before `val_end=4147`, and Typhoon event 1 ends before `val_end=3456`. Only Bridge 0/1 and Typhoon 2/3 events are fully test-external; the required complete coverage is absent. Validation traffic MAE can also see those disturbances, so they cannot be treated as untouched final test evidence.
+
+Consequence: the 24/60 partial neural runs are invalid for final A3-L4/DCRNN inference. Do not report M2 auxiliary-supervision gains, M3 CVaR gains, A3-L4 superiority, three-seed stability or bootstrap conclusions from them. Keep L4 frozen. The next allowed task is E-L4-2A-R with one-time preregistered validation ends Bridge=4032, Rainstorm=9676 and Typhoon=3194. Only a fresh passing audit may authorize formal training.

@@ -1,9 +1,9 @@
 # Project Instructions
 
 ## Research scope
-- Treat DGCN-STSGCN as a frozen forecasting backbone until the statistical resilience target is validated.
-- Do not modify the model architecture, graph fusion, training loss, CVaR, uncertainty weighting, or conformal prediction unless the user explicitly starts that phase.
-- The current next step is L3-0: audit hierarchical ECDF source levels, Typhoon speed anomalies, and the conditional-CDF query API before implementing the latent factor model.
+- The two-dimensional L4 statistical definition is frozen: flow lower-tail demand/service-volume deficit and speed lower-tail efficiency deficit remain separate.
+- Do not modify the model architecture, graph fusion, training loss, CVaR, uncertainty weighting, or conformal prediction until the corrected final forecasting protocol passes its stage gate.
+- The current next step is E-L4-2A-R: preregister validation end boundaries that place every fixed Bridge/Rainstorm/Typhoon event fully in the test target period, then rerun the read-only alignment audit before any M0/M1/M2/M3 training.
 - Read `PROJECT_MEMORY.md`, `EXPERIMENT_LOG.md`, and `DECISION_LOG.md` before substantial project work.
 
 ## Git workflow

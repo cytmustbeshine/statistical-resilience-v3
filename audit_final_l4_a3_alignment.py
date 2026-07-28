@@ -22,9 +22,22 @@ EVENT_WINDOWS = {
 }
 
 
+def audit_event_test_coverage(event_windows: list[tuple[int, int]], val_end_exclusive: int) -> list[dict[str, object]]:
+    """Describe whether each preregistered event is fully external to validation."""
+    return [
+        {
+            "event_id": event_id,
+            "start_index": int(start),
+            "end_index": int(end),
+            "fully_in_test": bool(start >= val_end_exclusive),
+            "overlaps_test": bool(end >= val_end_exclusive),
+        }
+        for event_id, (start, end) in enumerate(event_windows, 1)
+    ]
+
 def markdown_table(frame: pd.DataFrame) -> str:
     if frame.empty:
-        return "????"
+        return "\u65e0\u8bb0\u5f55"
     columns = list(frame.columns)
     lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join(["---"] * len(columns)) + " |"]
     lines.extend("| " + " | ".join(str(value) for value in row) + " |" for row in frame.itertuples(index=False, name=None))
@@ -100,6 +113,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         train_end = int(split["strict_train_time_end_exclusive"])
         val_end = int(len(frame) * 0.8)
         training_contains_event = any(start < train_end for start, _ in EVENT_WINDOWS[dataset])
+        event_coverage = audit_event_test_coverage(EVENT_WINDOWS[dataset], val_end)
+        for item in event_coverage:
+            item["overlaps_validation"] = bool(item["start_index"] < val_end and item["end_index"] >= train_end)
+        all_events_fully_in_test = bool(all(item["fully_in_test"] for item in event_coverage))
         split_rows.append({
             "dataset": dataset,
             "num_timesteps": len(frame),
@@ -109,7 +126,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "val_test_target_overlap": split["strict_val_test_overlap_steps"],
             "strict_split_pass": split["strict_split_leak_free"],
             "event_windows": json.dumps(EVENT_WINDOWS[dataset]),
+            "event_coverage": json.dumps(event_coverage),
+            "events_fully_in_test": int(sum(item["fully_in_test"] for item in event_coverage)),
+            "event_count": len(event_coverage),
+            "all_events_fully_in_test": all_events_fully_in_test,
             "training_contains_target_event": training_contains_event,
+            "recommended_val_time_end_exclusive": min(val_end, min(start for start, _ in EVENT_WINDOWS[dataset])),
         })
         variables = ["flow"] if dataset == "bridge" else ["flow", "speed"]
         for variable in variables:
@@ -149,6 +171,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "strict_split_pass": split["strict_split_leak_free"],
             "training_event_free": not training_contains_event,
             "event_weather_input_excluded": True,
+            "all_events_fully_in_test": all_events_fully_in_test,
         })
 
     smoke_passed, dst_shape, dcrnn_shape = smoke_models(5, args.history, args.horizon)
@@ -160,7 +183,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     nodes.to_csv(output_dir / "final_node_alignment_audit.csv", index=False, encoding="utf-8-sig")
 
     stage_passed = bool(
-        protocol[["typhoon_fixed_16_pass", "bridge_speed_unavailable", "strict_split_pass", "training_event_free", "event_weather_input_excluded"]].all().all()
+        protocol[["typhoon_fixed_16_pass", "bridge_speed_unavailable", "strict_split_pass", "training_event_free", "event_weather_input_excluded", "all_events_fully_in_test"]].all().all()
         and features[["event_free_pass", "profile_read_only_available", "physical_roundtrip_finite"]].all().all()
         and smoke_passed
     )
@@ -169,23 +192,33 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "e_l4_2b_authorized": stage_passed,
         "legacy_a3_final_l4_aligned": False, "legacy_a3_event_free": False,
         "model_core_change_required": False,
-        "minimal_model_change": "allow l4_deficit auxiliary output semantics only",
+        "minimal_model_change": "none until event-aligned split audit passes",
         "dstsgcn_smoke_shape": dst_shape, "dcrnn_smoke_shape": dcrnn_shape,
+        "blockers": [] if stage_passed else [
+            f"{row.dataset}: only {row.events_fully_in_test}/{row.event_count} preregistered events are fully in test targets"
+            for row in splits.itertuples(index=False) if not row.all_events_fully_in_test
+        ],
+        "recommended_val_time_end_exclusive": {
+            str(row.dataset): int(row.recommended_val_time_end_exclusive) for row in splits.itertuples(index=False)
+        },
     }
     (output_dir / "e_l4_2a_decision.json").write_text(json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report = [
-        "# E-L4-2A ????????", "", "## ????", "",
-        "**??????? E-L4-2B?**" if stage_passed else "**???????? E-L4-2B?**", "",
-        "?? L4 ?????flow ??? demand/service-volume deficit?speed ??? efficiency deficit?? A3 ?? robust flow log-ratio ???????/?????? ratio ??????????????", "",
-        "## ????", "", markdown_table(protocol), "",
-        "## ????? profile", "", markdown_table(features), "",
-        "## ????", "", markdown_table(splits), "",
-        "## ??????", "",
-        "- ???? L4 ????????",
-        "- ?? event-free ? M0/M1/M2/M3 ??????????",
-        "- `model.py` ????? `l4_deficit` ??????????????STSGCN block ? quality fusion?",
-        "- `train.py` ???? log-ratio ?? L4 ???", "",
-        f"DSTSGCN smoke: `{dst_shape}`?DCRNN smoke: `{dcrnn_shape}`?",
+        "# E-L4-2A \u6700\u7ec8\u534f\u8bae\u5bf9\u9f50\u5ba1\u8ba1", "", "## \u9636\u6bb5\u51b3\u7b56", "",
+        "**\u5141\u8bb8\u8fdb\u5165 E-L4-2B\u3002**" if stage_passed else "**\u4e0d\u5141\u8bb8\u8fdb\u5165 E-L4-2B\u3002**", "",
+        "\u6700\u7ec8 L4 \u4f7f\u7528 flow \u4e0b\u5c3e demand/service-volume deficit \u548c speed \u4e0b\u5c3e efficiency deficit\u3002\u65e7 A3 \u4f7f\u7528 robust flow log-ratio \u8f85\u52a9\u76ee\u6807\uff0c\u5e76\u5728 Rainstorm/Typhoon \u4e2d\u4f7f\u7528\u4e86\u5929\u6c14\u6216\u4e8b\u4ef6\u5f3a\u5ea6\uff0c\u56e0\u6b64\u53ea\u4fdd\u7559\u4e3a legacy \u63a2\u7d22\u3002", "",
+        "## \u534f\u8bae\u68c0\u67e5", "", markdown_table(protocol), "",
+        "## \u4e8b\u4ef6\u65e0\u5173\u8f93\u5165\u4e0e\u51bb\u7ed3 profile", "", markdown_table(features), "",
+        "## \u4e25\u683c\u65f6\u95f4\u5207\u5206", "", markdown_table(splits), "",
+        "## \u963b\u65ad\u9879", "",
+        *( ["- " + item for item in decision["blockers"]] if decision["blockers"] else ["- \u65e0\u3002"] ), "",
+        "\u5f53\u524d 80% validation/test \u8fb9\u754c\u4f7f Bridge \u4e8b\u4ef6\u5927\u90e8\u5206\u548c Typhoon \u7b2c 1 \u6bb5\u4e8b\u4ef6\u843d\u5165\u9a8c\u8bc1\u671f\uff0c\u65e0\u6cd5\u4f5c\u4e3a\u6700\u7ec8\u6d4b\u8bd5\u8bc1\u636e\u3002\u6700\u5c0f\u4fee\u590d\u662f\u4e00\u6b21\u6027\u9884\u6ce8\u518c validation \u7ed3\u675f\u8fb9\u754c\uff1aBridge=4032\u3001Rainstorm=9676\u3001Typhoon=3194\uff0c\u5e76\u91cd\u65b0\u6267\u884c\u9636\u6bb5 A\u3002", "",
+        "## \u6700\u5c0f\u5b9e\u73b0\u8303\u56f4", "",
+        "- \u4e0d\u4fee\u6539 L4 \u7edf\u8ba1\u5b9a\u4e49\u3001profile \u6216\u9608\u503c\u3002",
+        "- \u5f53\u524d\u9636\u6bb5 A \u672a\u901a\u8fc7\uff0c\u4e0d\u5141\u8bb8\u542f\u52a8 M0/M1/M2/M3 \u6b63\u5f0f\u8bad\u7ec3\u3002",
+        "- `model.py` \u4ec5\u5141\u8bb8 `l4_deficit` \u8f85\u52a9\u8f93\u51fa\u8bed\u4e49\uff0c\u4e0d\u4fee\u6539\u9aa8\u67b6\u3001STSGCN block \u6216 quality fusion\u3002",
+        "- `train.py` \u4e0d\u518d\u5c06\u65e7 log-ratio \u5f53\u4f5c\u6700\u7ec8 L4 \u76ee\u6807\u3002", "",
+        f"DSTSGCN smoke: `{dst_shape}`\uff1bDCRNN smoke: `{dcrnn_shape}`\u3002",
     ]
     (output_dir / "e_l4_2a_audit_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(json.dumps(decision, ensure_ascii=False))

@@ -111,3 +111,11 @@ The evaluator reused frozen train-only L4 profiles, train q90/q99 thresholds and
 Key results: Rainstorm demand/efficiency event means were 2.1434/2.4939 versus non-event 0.8502/0.6680; both-high accuracy was 0.8630. Typhoon efficiency-only accuracy was 0.8542 and 0.8415 for observable windows 1 and 2. Bridge demand high-state precision/recall were both 0. Typhoon window 0 had no formal test targets and was marked unavailable. Rainstorm demand peak timing error was 16.25 hours; efficiency was 0.67 hours. Observable Typhoon peak errors were 0.17-1.00 hours.
 
 Verification: event evaluator compilation passed; 5 event tests passed; previous 135 tests also passed; total unittest count is 140. No pytest run because pytest is not installed.
+## E-L4-2A corrected alignment stop (2026-07-28)
+Environment: Windows PowerShell; Python `D:\soft\Python310\python.exe`; branch `main`; starting baseline `9773f81`; prior audit commit `52ba2e6`.
+
+The audit was rerun with explicit per-event test coverage. Existing checks passed for train-only frozen profiles/scalers, disjoint target timestamps, event/weather-free features, Bridge flow-only handling, Typhoon fixed 16-node matching, and finite DSTSGCN/DCRNN smoke inference. The new required coverage check failed: Bridge 0/1 and Typhoon 2/3 fixed events are fully in the default test target period; Rainstorm is 1/1.
+
+A formal command using three seeds, 20 epochs and four neural models had begun before the coverage defect was discovered. It was stopped after 24/60 completed result files. No stderr failure occurred, but the protocol itself is invalid for the requested final event comparison. Partial outputs were preserved outside Git and are explicitly non-scientific.
+
+Verification after correction: `py_compile` passed; `tests.test_l4_prediction_pipeline` passed 38 tests, including two new event-coverage tests. The complete existing suite passed 142 unittest tests. `pytest` remains unavailable (`No module named pytest`). Stage B was not completed, analyzed, committed or accepted.
