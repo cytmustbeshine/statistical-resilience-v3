@@ -137,3 +137,9 @@ No neural training was started. The profile-compatible split passed target disjo
 Canonical threshold comparison failed only for speed/efficiency. Rainstorm reloaded q90/q99 were 1.1925512791904394/1.8627887815816262 versus canonical 1.1506422622965709/1.780246632339144. Typhoon reloaded values were 1.5592506861505906/2.6820813337557605 versus canonical 1.5524600428879205/2.668365734884944. Loader diagnostics found 578 and 146 raw missing speed observations converted to zero, respectively.
 
 Verification: compilation passed; pipeline unittest 86/86; full unittest 190/190; pytest unavailable. All nine CSV outputs, the decision JSON and Chinese Markdown report reloaded successfully. Formal partial outputs remained 24 result files, 120 files and 492153111 bytes with unchanged result hashes.
+## E-L4-2A-R3 dual-space missing-value audit (2026-08-02)
+No training was run. Added `load_ordered_univariate_series_physical()` for NaN-preserving physical values and `impute_model_inputs_train_only()` for finite train-only per-node median model inputs. Added `audit_l4_missing_space_alignment.py` and `tests/test_l4_missing_space_alignment.py`.
+
+R3 output: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r3`. Raw missing counts were Bridge flow 0, Rainstorm flow 0, Rainstorm speed 578, Typhoon flow 0, and Typhoon speed 146. The physical loader preserved those missing values, model inputs and scaled inputs were finite, imputation/scaler parameters were train-only, and the canonical L4 q90/q99 values were reproduced for all five dimensions.
+
+Verification: compilation passed; R3 tests 13/13 passed; complete unittest discovery 203/203 passed; pytest is unavailable. All seven CSV outputs, decision JSON and Markdown report reloaded successfully. Formal partial outputs stayed at 24 result.json files, 120 total files and 492153111 bytes with unchanged result hashes.

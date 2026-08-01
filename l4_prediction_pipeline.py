@@ -173,6 +173,64 @@ def load_ordered_univariate_series(
     return data, ordered_timestamps, node_names
 
 
+def load_ordered_univariate_series_physical(
+    csv_path: str,
+    time_col: str,
+    value_columns: list[str],
+    value_suffix: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Load ordered physical traffic values while preserving missing observations."""
+    frame = read_csv_with_fallback(csv_path)
+    timestamps = pd.to_datetime(frame[time_col], errors="coerce")
+    order = np.argsort(timestamps.to_numpy(), kind="stable")
+    ordered = frame.iloc[order]
+    values = ordered[value_columns].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    node_names = [
+        str(column)[:-len(value_suffix)]
+        if value_suffix and str(column).endswith(value_suffix)
+        else str(column)
+        for column in value_columns
+    ]
+    return values[..., None], timestamps.to_numpy()[order], node_names
+
+
+def impute_model_inputs_train_only(
+    physical_values: np.ndarray,
+    train_time_end_exclusive: int,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Create finite model inputs using per-node medians fitted only on train rows."""
+    values = np.asarray(physical_values, dtype=float)
+    if values.ndim != 3 or values.shape[-1] != 1:
+        raise ValueError("physical_values must have shape [time,nodes,1]")
+    end = int(train_time_end_exclusive)
+    if end <= 0 or end > len(values):
+        raise ValueError("invalid train_time_end_exclusive")
+    train = values[:end, :, 0]
+    finite_train = train[np.isfinite(train)]
+    if finite_train.size == 0:
+        raise ValueError("training prefix has no finite values for imputation")
+    global_median = float(np.median(finite_train))
+    medians = np.full(train.shape[1], global_median, dtype=float)
+    for node_index in range(train.shape[1]):
+        node_values = train[:, node_index]
+        node_values = node_values[np.isfinite(node_values)]
+        if node_values.size:
+            medians[node_index] = float(np.median(node_values))
+    finite = np.isfinite(values[..., 0])
+    model = values[..., 0].copy()
+    missing = ~finite
+    model[missing] = np.take(medians, np.where(missing)[1])
+    model = model[..., None]
+    metadata = {
+        "method": "train_only_node_median",
+        "train_time_end_exclusive": end,
+        "node_medians": medians.tolist(),
+        "global_median": global_median,
+        "raw_missing_count": int(missing.sum()),
+        "model_missing_count": int((~np.isfinite(model)).sum()),
+    }
+    return model, metadata
+
 def fit_train_only_scaler(
     values: np.ndarray,
     train_time_end_exclusive: int,

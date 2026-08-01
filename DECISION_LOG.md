@@ -131,3 +131,9 @@ Decision: reject E-L4-2A-R2 and keep E-L4-2B unauthorized.
 The +2 train-boundary contradiction is resolved: model split train ends now exactly equal the frozen profile reports while all fixed events remain external to validation. The remaining blocker is variable-space consistency for speed. The current prediction loader converts missing speed observations to zero before frozen-profile evaluation, and the resulting efficiency q90/q99 values differ from the canonical L4 study output. Demand thresholds are exact because those loaded flow series contain no corresponding missing-value conversion.
 
 Do not overwrite canonical thresholds, refit profiles, train M0/M1/M2/M3, or select a final model. The next allowed work must be a separate read-only/minimal pipeline audit that preserves missing physical speed values for L4 postprocessing while defining an explicit, training-safe missing-data policy for neural inputs.
+## Accepted gate: E-L4-2A-R3 dual-space missing-value contract (2026-08-02)
+Decision: accept the read-only R3 protocol repair and permit a separately controlled E-L4-2B preparation. This does not select a final model and does not claim any forecasting result.
+
+The physical L4 space now preserves missing observations, and the model-input space uses a separate train-only node-median imputation copy. Canonical q90/q99 thresholds are exactly reproducible, including speed/efficiency. Missing truth remains excluded from L4 metrics rather than treated as zero or low speed. Split, event, profile, scaler, node and feature contracts all pass, and the legacy partial formal outputs remain untouched.
+
+E-L4-2B is not automatically started. Before any formal training, the future DCRNN/M1/M2/M3 runner must explicitly consume the same dual-space contract, save imputation metadata and masks, use identical profile-compatible event-external boundaries, and pass a no-training smoke audit. No final model has been selected.
