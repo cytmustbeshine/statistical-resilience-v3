@@ -55,6 +55,21 @@ FINAL_EVENT_EXTERNAL_SPLITS = {
     },
 }
 
+PROFILE_COMPATIBLE_EVENT_EXTERNAL_SPLITS = {
+    "bridge": {
+        "train_time_end_exclusive": 3108,
+        "val_time_end_exclusive": 4032,
+    },
+    "rainstorm": {
+        "train_time_end_exclusive": 7255,
+        "val_time_end_exclusive": 9676,
+    },
+    "typhoon": {
+        "train_time_end_exclusive": 2590,
+        "val_time_end_exclusive": 3194,
+    },
+}
+
 
 def final_event_external_split(dataset: str) -> dict[str, int]:
     """Return a copy of the preregistered event-external split boundaries."""
@@ -64,6 +79,16 @@ def final_event_external_split(dataset: str) -> dict[str, int]:
     split = dict(FINAL_EVENT_EXTERNAL_SPLITS[key])
     if split["train_time_end_exclusive"] >= split["val_time_end_exclusive"]:
         raise RuntimeError(f"Invalid final event-external split for {key}")
+    return split
+
+def profile_compatible_event_external_split(dataset: str) -> dict[str, int]:
+    """Return a copy of the frozen-profile-compatible event-external split."""
+    key = str(dataset).strip().lower()
+    if key not in PROFILE_COMPATIBLE_EVENT_EXTERNAL_SPLITS:
+        raise ValueError(f"Unknown profile-compatible split dataset: {dataset}")
+    split = dict(PROFILE_COMPATIBLE_EVENT_EXTERNAL_SPLITS[key])
+    if split["train_time_end_exclusive"] >= split["val_time_end_exclusive"]:
+        raise RuntimeError(f"Invalid profile-compatible event-external split for {key}")
     return split
 
 

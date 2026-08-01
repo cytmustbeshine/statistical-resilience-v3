@@ -38,6 +38,7 @@ from flow_speed_resilience import match_node_variables
 from l4_prediction_pipeline import (
     event_free_feature_contract,
     final_event_external_split,
+    profile_compatible_event_external_split,
     fit_train_only_scaler,
     load_forecast_checkpoint,
     load_prediction_archive,
@@ -54,6 +55,7 @@ from audit_final_l4_a3_alignment import (
     MODEL_SHA256_AT_START,
     TRAIN_SHA256_AT_START,
     audit_event_test_coverage,
+    canonical_l4_threshold_map,
     file_sha256,
     partial_output_inventory,
 )
@@ -580,6 +582,178 @@ class FinalEventExternalRepairTests(unittest.TestCase):
 
     def test_corrected_audit_json_roundtrip(self):
         payload = {"stage": "E-L4-2A-R", "stage_passed": False, "training_run": False}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decision.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), payload)
+
+class ProfileCompatibleEventExternalTests(unittest.TestCase):
+    DATA_LENGTHS = {"bridge": 5184, "rainstorm": 12096, "typhoon": 4320}
+    EXPECTED_WINDOWS = {
+        "bridge": (3085, 913, 1141),
+        "rainstorm": (7232, 2410, 2409),
+        "typhoon": (2567, 593, 1115),
+    }
+
+    @staticmethod
+    def split_targets(dataset):
+        split = profile_compatible_event_external_split(dataset)
+        train, val, test, info = split_traffic_window_indices_strict(
+            ProfileCompatibleEventExternalTests.DATA_LENGTHS[dataset],
+            12,
+            12,
+            train_time_end_exclusive=split["train_time_end_exclusive"],
+            val_time_end_exclusive=split["val_time_end_exclusive"],
+        )
+        offsets = np.arange(12, 24)
+        sets = [set((indices[:, None] + offsets).reshape(-1).tolist()) for indices in (train, val, test)]
+        return train, val, test, info, sets
+
+    def test_profile_compatible_split_returns_copy(self):
+        split = profile_compatible_event_external_split("bridge")
+        split["train_time_end_exclusive"] = -1
+        self.assertEqual(profile_compatible_event_external_split("bridge")["train_time_end_exclusive"], 3108)
+
+    def test_unknown_profile_compatible_dataset_rejected(self):
+        with self.assertRaises(ValueError):
+            profile_compatible_event_external_split("unknown")
+
+    def test_profile_compatible_boundaries(self):
+        expected = {
+            "bridge": {"train_time_end_exclusive": 3108, "val_time_end_exclusive": 4032},
+            "rainstorm": {"train_time_end_exclusive": 7255, "val_time_end_exclusive": 9676},
+            "typhoon": {"train_time_end_exclusive": 2590, "val_time_end_exclusive": 3194},
+        }
+        for dataset, boundaries in expected.items():
+            self.assertEqual(profile_compatible_event_external_split(dataset), boundaries)
+
+    def test_profile_compatible_expected_window_counts(self):
+        for dataset, expected in self.EXPECTED_WINDOWS.items():
+            train, val, test, info, _ = self.split_targets(dataset)
+            self.assertEqual((len(train), len(val), len(test)), expected)
+            self.assertEqual(info["omitted_boundary_windows"], 22)
+
+    def test_profile_compatible_targets_pairwise_disjoint(self):
+        for dataset in self.DATA_LENGTHS:
+            _, _, _, info, (train, val, test) = self.split_targets(dataset)
+            self.assertTrue(info["target_disjoint"])
+            self.assertFalse(train & val)
+            self.assertFalse(val & test)
+            self.assertFalse(train & test)
+
+    def test_profile_compatible_targets_do_not_cross_boundaries(self):
+        for dataset in self.DATA_LENGTHS:
+            split = profile_compatible_event_external_split(dataset)
+            train, val, test, _, _ = self.split_targets(dataset)
+            self.assertTrue(np.all(train + 23 < split["train_time_end_exclusive"]))
+            self.assertTrue(np.all(val + 12 >= split["train_time_end_exclusive"]))
+            self.assertTrue(np.all(val + 23 < split["val_time_end_exclusive"]))
+            self.assertTrue(np.all(test + 12 >= split["val_time_end_exclusive"]))
+
+    def test_profile_compatible_events_are_test_external(self):
+        for dataset in self.DATA_LENGTHS:
+            _, _, _, _, (train, val, test) = self.split_targets(dataset)
+            for start, end in EVENT_WINDOWS[dataset]:
+                event = set(range(start, end + 1))
+                self.assertFalse(train & event)
+                self.assertFalse(val & event)
+                self.assertTrue(event.issubset(test))
+
+    def test_profile_compatible_typhoon_segments_remain_separate(self):
+        self.assertEqual(len(EVENT_WINDOWS["typhoon"]), 3)
+        self.assertEqual(separate_event_segments(EVENT_WINDOWS["typhoon"]), EVENT_WINDOWS["typhoon"])
+
+    def test_profile_compatible_train_end_matches_reports(self):
+        l4 = Path(r"D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4")
+        l3 = Path(r"D:\TrafficGNN\outputs\latent_traffic_performance_l3")
+        specs = [
+            ("bridge", "demand"),
+            ("rainstorm", "demand"),
+            ("rainstorm", "efficiency"),
+            ("typhoon", "demand"),
+            ("typhoon", "efficiency"),
+        ]
+        for dataset, variable in specs:
+            paths = profile_paths(dataset, variable, l4, l3)
+            metadata = json.loads(paths[2].read_text(encoding="utf-8"))
+            self.assertEqual(metadata["train_end_exclusive"], profile_compatible_event_external_split(dataset)["train_time_end_exclusive"])
+
+    def test_profile_files_are_not_modified_by_split_lookup(self):
+        path = Path(r"D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4\bridge\demand_profile_report.json")
+        before = file_sha256(path)
+        profile_compatible_event_external_split("bridge")
+        self.assertEqual(file_sha256(path), before)
+
+    def test_profile_compatible_scaler_unchanged_by_val_end(self):
+        values = np.arange(300.0).reshape(150, 2, 1)
+        timestamps = np.arange(150).astype("datetime64[m]")
+        left = strict_data_bundle(values, timestamps, 4, 3, train_time_end_exclusive=80, val_time_end_exclusive=110)
+        right = strict_data_bundle(values, timestamps, 4, 3, train_time_end_exclusive=80, val_time_end_exclusive=125)
+        self.assertEqual(left["scaler_metadata"], right["scaler_metadata"])
+
+    def test_canonical_threshold_map_has_five_required_dimensions(self):
+        thresholds = canonical_l4_threshold_map(Path(r"D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4"))
+        required = {
+            ("bridge", "demand"),
+            ("rainstorm", "demand"),
+            ("rainstorm", "efficiency"),
+            ("typhoon", "demand"),
+            ("typhoon", "efficiency"),
+        }
+        self.assertTrue(required.issubset(thresholds))
+        self.assertTrue(all(np.isfinite(list(thresholds[key].values())).all() for key in required))
+
+    def test_canonical_threshold_mismatch_is_detectable(self):
+        canonical = canonical_l4_threshold_map(Path(r"D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4"))
+        previous = pd.read_csv(
+            r"D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r\corrected_profile_boundary_audit.csv",
+            encoding="utf-8-sig",
+        )
+        rain = previous[(previous.dataset == "rainstorm") & (previous.variable == "speed")].iloc[0]
+        self.assertFalse(np.isclose(float(rain.q90_before), canonical[("rainstorm", "efficiency")]["q90"], rtol=0.0, atol=1e-12))
+
+    def test_profile_compatible_flow_speed_share_boundary(self):
+        for dataset in ("rainstorm", "typhoon"):
+            self.assertEqual(profile_compatible_event_external_split(dataset), profile_compatible_event_external_split(dataset))
+
+    def test_profile_compatible_bridge_has_no_efficiency(self):
+        frame = pd.read_csv(DATASETS["bridge"]["csv"], nrows=1)
+        plan = paired_column_plan(list(frame.columns), None, None, 41)
+        self.assertEqual(plan["paired_speed_columns"], [])
+
+    def test_profile_compatible_typhoon_fixed_16_nodes(self):
+        frame = pd.read_csv(DATASETS["typhoon"]["csv"], nrows=1)
+        plan = paired_column_plan(list(frame.columns), "_volume", "_speed", 41)
+        self.assertEqual(len(plan["paired_node_names"]), 16)
+        self.assertEqual(plan["paired_node_names"], [name.removesuffix("_volume") for name in plan["paired_flow_columns"]])
+
+    def test_profile_compatible_feature_contract(self):
+        contract = event_free_feature_contract()
+        self.assertEqual(contract["input_features"], ["traffic"])
+        self.assertEqual(contract["event_features"], [])
+        self.assertEqual(contract["weather_features"], [])
+
+    def test_profile_compatible_model_and_train_unchanged(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(file_sha256(root / "model.py"), MODEL_SHA256_AT_START)
+        self.assertEqual(file_sha256(root / "train.py"), TRAIN_SHA256_AT_START)
+
+    def test_profile_compatible_partial_outputs_unchanged(self):
+        baseline_path = Path(r"D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r\_partial_integrity_before.json")
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8-sig"))
+        current = partial_output_inventory(Path(baseline["root"]))
+        self.assertEqual((current["result_count"], current["file_count"], current["total_bytes"]), (24, 120, 492153111))
+        self.assertEqual(
+            {row["relative_path"]: row["sha256"] for row in current["result_files"]},
+            {row["relative_path"]: row["sha256"] for row in baseline["result_files"]},
+        )
+
+    def test_profile_compatible_decision_json_roundtrip(self):
+        payload = {
+            "stage": "E-L4-2A-R2",
+            "split_protocol": "profile_compatible_event_external",
+            "training_run": False,
+        }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "decision.json"
             path.write_text(json.dumps(payload), encoding="utf-8")

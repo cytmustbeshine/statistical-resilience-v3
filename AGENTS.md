@@ -3,7 +3,7 @@
 ## Research scope
 - The two-dimensional L4 statistical definition is frozen: flow lower-tail demand/service-volume deficit and speed lower-tail efficiency deficit remain separate.
 - Do not modify the model architecture, graph fusion, training loss, CVaR, uncertainty weighting, or conformal prediction until the corrected final forecasting protocol passes its stage gate.
-- E-L4-2A-R was executed and remains blocked: event-external validation boundaries pass coverage, but the requested train ends are +2 later than the frozen L4 profile metadata. E-L4-2B and all M0/M1/M2/M3 training remain unauthorized until a separately preregistered boundary-compatibility decision is made.
+- E-L4-2A-R2 resolved the train-boundary mismatch but remains blocked because the prediction loader converts missing speed values to zero, causing reloaded efficiency q90/q99 to differ from canonical L4 thresholds. E-L4-2B and all M0/M1/M2/M3 training remain unauthorized pending a separately preregistered missing-preserving physical-space pipeline audit.
 - Read `PROJECT_MEMORY.md`, `EXPERIMENT_LOG.md`, and `DECISION_LOG.md` before substantial project work.
 
 ## Git workflow

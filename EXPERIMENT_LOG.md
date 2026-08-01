@@ -129,3 +129,11 @@ Outputs: ten required repair-audit artifacts under `e_l4_2a_r`. All CSV/JSON/Mar
 Failure: requested train ends 3110/7257/2592 differ by +2 from frozen profile train ends 3108/7255/2590. The audit therefore returned `stage_passed=false`, `e_l4_2b_authorized=false`, and stopped. No DCRNN or DSTSGCN process was trained. The 24 partial `result.json` hashes, 120-file count and 492153111-byte formal directory total were unchanged.
 
 Verification: four-file compilation passed; pipeline unittest 66/66 passed; full unittest 170/170 passed in 2.532 seconds. Pytest invocation failed because the module is not installed; this is not recorded as pytest success.
+## E-L4-2A-R2 audit run (2026-08-01)
+Command: `D:\soft\Python310\python.exe audit_final_l4_a3_alignment.py --split-protocol profile_compatible_event_external --output-dir D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r2`.
+
+No neural training was started. The profile-compatible split passed target disjointness, expected window counts, event-external coverage, exact profile train boundaries, train-only scaler checks, Typhoon fixed-16 matching, Bridge flow-only behavior, event/weather exclusion, inverse roundtrip, and partial-output integrity.
+
+Canonical threshold comparison failed only for speed/efficiency. Rainstorm reloaded q90/q99 were 1.1925512791904394/1.8627887815816262 versus canonical 1.1506422622965709/1.780246632339144. Typhoon reloaded values were 1.5592506861505906/2.6820813337557605 versus canonical 1.5524600428879205/2.668365734884944. Loader diagnostics found 578 and 146 raw missing speed observations converted to zero, respectively.
+
+Verification: compilation passed; pipeline unittest 86/86; full unittest 190/190; pytest unavailable. All nine CSV outputs, the decision JSON and Chinese Markdown report reloaded successfully. Formal partial outputs remained 24 result files, 120 files and 492153111 bytes with unchanged result hashes.

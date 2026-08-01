@@ -19,6 +19,7 @@ from l4_prediction_pipeline import (
     final_event_external_split,
     load_ordered_univariate_series,
     paired_column_plan,
+    profile_compatible_event_external_split,
     scaler_metadata,
     strict_data_bundle,
 )
@@ -295,12 +296,38 @@ def _profile_thresholds(
     return {"q75": float(quantiles["q75"]), "q90": float(quantiles["q90"]), "q99": float(quantiles["q99"])}
 
 
+def canonical_l4_threshold_map(l4_dir: Path) -> dict[tuple[str, str], dict[str, float]]:
+    """Load canonical q90/q99 thresholds from the frozen L4 study output."""
+    path = l4_dir / "l4_dimension_comparison.csv"
+    frame = pd.read_csv(path, encoding="utf-8-sig")
+    definition_to_variable = {
+        "L4_demand_service": "demand",
+        "L4_operating_efficiency": "efficiency",
+    }
+    thresholds = {}
+    for row in frame.itertuples(index=False):
+        variable = definition_to_variable.get(str(row.definition))
+        if variable is None:
+            continue
+        thresholds[(str(row.dataset), variable)] = {
+            "q90": float(row.q90_threshold),
+            "q99": float(row.q99_threshold),
+        }
+    return thresholds
+
 def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
+    protocol = getattr(args, "split_protocol", "final_event_external")
+    is_r2 = protocol == "profile_compatible_event_external"
+    split_provider = (
+        profile_compatible_event_external_split if is_r2 else final_event_external_split
+    )
+    stage_name = "E-L4-2A-R2" if is_r2 else "E-L4-2A-R"
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     l4_dir = Path(args.l4_dir)
     source_profile_dir = Path(args.source_profile_dir)
     formal_root = Path(args.formal_root)
+    canonical_thresholds = canonical_l4_threshold_map(l4_dir)
     before_path = output_dir / "_partial_integrity_before.json"
     if not before_path.exists():
         raise FileNotFoundError(f"Missing prerepair partial-output inventory: {before_path}")
@@ -313,13 +340,14 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
     scaler_rows = []
     node_rows = []
     feature_rows = []
+    canonical_rows = []
     contract = event_free_feature_contract()
 
     for dataset in ("bridge", "rainstorm", "typhoon"):
         config = DATASETS[dataset]
         frame = ordered_frame(config)
         timestamps_all = pd.to_datetime(frame[str(config["time_col"])], errors="raise").to_numpy()
-        split_config = final_event_external_split(dataset)
+        split_config = split_provider(dataset)
         train_end = int(split_config["train_time_end_exclusive"])
         val_end = int(split_config["val_time_end_exclusive"])
         if val_end > len(frame):
@@ -427,6 +455,41 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
                 "profile_report": str(paths[2]),
                 "profile_report_sha256": file_sha256(paths[2]),
             })
+            canonical = canonical_thresholds.get((dataset, profile_variable))
+            if canonical is None:
+                raise RuntimeError(f"Canonical L4 thresholds unavailable for {dataset}/{profile_variable}")
+            q90_match = bool(np.isclose(thresholds["q90"], canonical["q90"], rtol=0.0, atol=1e-12))
+            q99_match = bool(np.isclose(thresholds["q99"], canonical["q99"], rtol=0.0, atol=1e-12))
+            raw_values = frame[columns].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+            loaded_values = np.asarray(values[..., 0], dtype=float)
+            raw_missing = ~np.isfinite(raw_values)
+            loaded_missing = ~np.isfinite(loaded_values)
+            missing_converted_to_zero = int(np.sum(raw_missing & (loaded_values == 0.0)))
+            canonical_rows.append({
+                "dataset": dataset,
+                "variable": variable,
+                "l4_dimension": profile_variable,
+                "profile_q90": thresholds["q90"],
+                "canonical_q90": canonical["q90"],
+                "q90_difference": thresholds["q90"] - canonical["q90"],
+                "q90_matches": q90_match,
+                "profile_q99": thresholds["q99"],
+                "canonical_q99": canonical["q99"],
+                "q99_difference": thresholds["q99"] - canonical["q99"],
+                "q99_matches": q99_match,
+                "canonical_thresholds_match": q90_match and q99_match,
+                "canonical_source": str(l4_dir / "l4_dimension_comparison.csv"),
+                "canonical_overwritten": False,
+                "raw_missing_count": int(raw_missing.sum()),
+                "loaded_missing_count": int(loaded_missing.sum()),
+                "missing_converted_to_zero_count": missing_converted_to_zero,
+                "loader_missing_policy": "np.nan_to_num(nan=0.0)",
+                "likely_mismatch_cause": (
+                    "missing_speed_converted_to_zero_before_frozen_profile"
+                    if not (q90_match and q99_match) and missing_converted_to_zero > 0
+                    else "none_detected"
+                ),
+            })
             for index, name in enumerate(names):
                 node_rows.append({
                     "dataset": dataset,
@@ -456,7 +519,7 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
         info = audit_bundle["split_info"]
         configuration_rows.append({
             "dataset": dataset,
-            "split_protocol": "final_event_external",
+            "split_protocol": protocol,
             "num_timesteps": len(frame),
             "history": args.history,
             "horizon": args.horizon,
@@ -468,7 +531,7 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
         })
         split_rows.append({
             "dataset": dataset,
-            "split_protocol": "final_event_external",
+            "split_protocol": protocol,
             "train_windows": len(audit_bundle["train_indices"]),
             "validation_windows": len(audit_bundle["val_indices"]),
             "test_windows": len(audit_bundle["test_indices"]),
@@ -513,6 +576,7 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
     scalers = pd.DataFrame(scaler_rows)
     nodes = pd.DataFrame(node_rows)
     features = pd.DataFrame(feature_rows)
+    canonical = pd.DataFrame(canonical_rows)
 
     after_inventory = partial_output_inventory(formal_root)
     before_by_path = {item["relative_path"]: item for item in before_inventory["result_files"]}
@@ -540,14 +604,39 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
         and integrity["sha256_unchanged"].all()
     )
 
-    corrected.to_csv(output_dir / "corrected_split_configuration.csv", index=False, encoding="utf-8-sig")
-    splits.to_csv(output_dir / "corrected_split_window_audit.csv", index=False, encoding="utf-8-sig")
-    coverage.to_csv(output_dir / "corrected_event_test_coverage.csv", index=False, encoding="utf-8-sig")
-    profiles.to_csv(output_dir / "corrected_profile_boundary_audit.csv", index=False, encoding="utf-8-sig")
-    scalers.to_csv(output_dir / "corrected_scaler_boundary_audit.csv", index=False, encoding="utf-8-sig")
-    nodes.to_csv(output_dir / "corrected_node_alignment_audit.csv", index=False, encoding="utf-8-sig")
-    features.to_csv(output_dir / "corrected_feature_contract_audit.csv", index=False, encoding="utf-8-sig")
-    integrity.to_csv(output_dir / "partial_formal_output_integrity.csv", index=False, encoding="utf-8-sig")
+    if is_r2:
+        output_files = {
+            "configuration": "profile_compatible_split_configuration.csv",
+            "splits": "profile_compatible_split_window_audit.csv",
+            "coverage": "profile_compatible_event_test_coverage.csv",
+            "profiles": "profile_boundary_exact_match_audit.csv",
+            "canonical": "canonical_l4_threshold_consistency_audit.csv",
+            "scalers": "scaler_boundary_audit.csv",
+            "nodes": "node_alignment_audit.csv",
+            "features": "feature_contract_audit.csv",
+            "integrity": "partial_formal_output_integrity.csv",
+        }
+    else:
+        output_files = {
+            "configuration": "corrected_split_configuration.csv",
+            "splits": "corrected_split_window_audit.csv",
+            "coverage": "corrected_event_test_coverage.csv",
+            "profiles": "corrected_profile_boundary_audit.csv",
+            "canonical": "canonical_l4_threshold_consistency_audit.csv",
+            "scalers": "corrected_scaler_boundary_audit.csv",
+            "nodes": "corrected_node_alignment_audit.csv",
+            "features": "corrected_feature_contract_audit.csv",
+            "integrity": "partial_formal_output_integrity.csv",
+        }
+    corrected.to_csv(output_dir / output_files["configuration"], index=False, encoding="utf-8-sig")
+    splits.to_csv(output_dir / output_files["splits"], index=False, encoding="utf-8-sig")
+    coverage.to_csv(output_dir / output_files["coverage"], index=False, encoding="utf-8-sig")
+    profiles.to_csv(output_dir / output_files["profiles"], index=False, encoding="utf-8-sig")
+    canonical.to_csv(output_dir / output_files["canonical"], index=False, encoding="utf-8-sig")
+    scalers.to_csv(output_dir / output_files["scalers"], index=False, encoding="utf-8-sig")
+    nodes.to_csv(output_dir / output_files["nodes"], index=False, encoding="utf-8-sig")
+    features.to_csv(output_dir / output_files["features"], index=False, encoding="utf-8-sig")
+    integrity.to_csv(output_dir / output_files["integrity"], index=False, encoding="utf-8-sig")
 
     all_disjoint = bool(splits["target_disjoint"].all())
     validation_event_free = bool((coverage["validation_event_target_count"] == 0).all())
@@ -556,6 +645,7 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
     scaler_train_only = bool(scalers["train_only"].all())
     scaler_unchanged = bool(scalers[["mean_unchanged", "std_unchanged"]].all().all())
     thresholds_unchanged = bool(profiles["thresholds_unchanged"].all())
+    canonical_match = bool(canonical["canonical_thresholds_match"].all())
     typhoon_fixed = bool(nodes.loc[nodes["dataset"] == "typhoon"].groupby("variable").size().eq(16).all())
     bridge_flow_only = bool(set(features.loc[features["dataset"] == "bridge", "variable"]) == {"flow"})
     feature_contract_pass = bool(features["event_weather_features_excluded"].all())
@@ -568,29 +658,47 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
             for row in profiles.itertuples(index=False) if not row.train_boundary_matches
         )
         blockers.append("Requested train_end values differ from frozen profile metadata: " + mismatches)
+    if not canonical_match:
+        mismatches = ", ".join(
+            f"{row.dataset}/{row.variable}: q90_diff={row.q90_difference:.12g}, q99_diff={row.q99_difference:.12g}"
+            for row in canonical.itertuples(index=False) if not row.canonical_thresholds_match
+        )
+        blockers.append("Reloaded frozen-profile thresholds differ from canonical L4 output: " + mismatches)
+        zero_filled = [
+            f"{row.dataset}/{row.variable}: {row.missing_converted_to_zero_count} missing values converted to zero"
+            for row in canonical.itertuples(index=False)
+            if not row.canonical_thresholds_match and row.missing_converted_to_zero_count > 0
+        ]
+        if zero_filled:
+            blockers.append(
+                "Likely threshold-path cause: load_wide_traffic_csv applies np.nan_to_num before frozen-profile evaluation; "
+                + ", ".join(zero_filled)
+            )
     checks = [
         all_disjoint, validation_event_free, all_events_in_test, profile_boundary_matches,
-        scaler_train_only, scaler_unchanged, thresholds_unchanged, typhoon_fixed,
+        scaler_train_only, scaler_unchanged, thresholds_unchanged, canonical_match, typhoon_fixed,
         bridge_flow_only, feature_contract_pass, partial_unchanged, model_unchanged, train_unchanged,
         bool(scalers["roundtrip_pass"].all()),
     ]
     stage_passed = bool(all(checks))
     decision = {
-        "stage": "E-L4-2A-R",
+        "stage": stage_name,
         "stage_passed": stage_passed,
         "e_l4_2b_authorized": stage_passed,
         "training_run": False,
         "model_modified": not model_unchanged,
         "loss_modified": False,
         "l4_definition_modified": False,
-        "split_protocol": "final_event_external",
+        "split_protocol": protocol,
         "all_target_splits_disjoint": all_disjoint,
         "validation_event_free": validation_event_free,
         "all_events_fully_in_test": all_events_in_test,
         "profile_train_boundary_unchanged": profile_boundary_matches,
+        "profile_train_boundary_exact": profile_boundary_matches,
         "scaler_train_only": scaler_train_only,
         "scaler_parameters_unchanged": scaler_unchanged,
         "thresholds_unchanged": thresholds_unchanged,
+        "canonical_l4_thresholds_match": canonical_match,
         "typhoon_fixed_16_nodes": typhoon_fixed,
         "bridge_flow_only": bridge_flow_only,
         "event_weather_features_excluded": feature_contract_pass,
@@ -604,33 +712,38 @@ def run_repair_audit(args: argparse.Namespace) -> dict[str, object]:
         "partial_total_bytes_after": int(after_inventory["total_bytes"]),
         "blockers": blockers,
     }
-    (output_dir / "e_l4_2a_r_decision.json").write_text(
+    (output_dir / ("e_l4_2a_r2_decision.json" if is_r2 else "e_l4_2a_r_decision.json")).write_text(
         json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     report = [
-        "# E-L4-2A-R \u6700\u7ec8\u4e8b\u4ef6\u5916\u90e8\u8bc4\u4ef7\u8fb9\u754c\u5ba1\u8ba1", "",
+        f"# {stage_name} \u51bb\u7ed3 Profile \u517c\u5bb9\u7684\u4e8b\u4ef6\u5916\u90e8\u8bc4\u4ef7\u5ba1\u8ba1", "",
         "## \u9636\u6bb5\u7ed3\u8bba", "",
         "**\u5ba1\u8ba1\u901a\u8fc7\uff0c\u4f46\u6309\u4efb\u52a1\u8981\u6c42\u505c\u6b62\uff0c\u4e0d\u81ea\u52a8\u8fdb\u5165 E-L4-2B\u3002**" if stage_passed else "**\u5ba1\u8ba1\u672a\u901a\u8fc7\uff0c\u4e0d\u5141\u8bb8\u8fdb\u5165 E-L4-2B\u3002**", "",
-        "\u672c\u8f6e\u6ca1\u6709\u8bad\u7ec3\u6a21\u578b\uff0c\u6ca1\u6709\u4fee\u6539\u6a21\u578b\u3001\u635f\u5931\u6216 L4 \u5b9a\u4e49\u3002\u9884\u6ce8\u518c\u7684 validation \u7ed3\u675f\u8fb9\u754c\u4f7f Bridge\u3001Rainstorm \u548c Typhoon \u7684\u56fa\u5b9a\u4e8b\u4ef6\u5168\u90e8\u5b8c\u6574\u8fdb\u5165\u6d4b\u8bd5\u76ee\u6807\u65f6\u95f4\uff1b\u4f46\u9884\u6ce8\u518c train_end \u4e0e\u51bb\u7ed3 profile \u5143\u6570\u636e\u4e0d\u4e00\u81f4\uff0c\u56e0\u6b64\u9636\u6bb5\u95e8\u4ecd\u88ab\u963b\u65ad\u3002", "",
-        "## \u4fee\u590d\u540e\u7684\u5207\u5206", "", markdown_table(corrected), "", markdown_table(splits), "",
-        "## \u4e8b\u4ef6\u8986\u76d6", "", markdown_table(coverage), "",
+        f"\u672c\u8f6e\u4f7f\u7528 `{protocol}` \u663e\u5f0f\u534f\u8bae\uff0c\u6ca1\u6709\u8bad\u7ec3\u6a21\u578b\uff0c\u6ca1\u6709\u4fee\u6539\u6a21\u578b\u3001\u635f\u5931\u6216 L4 \u5b9a\u4e49\u3002", "",
+        "## \u5207\u5206\u914d\u7f6e\u4e0e\u7a97\u53e3", "", markdown_table(corrected), "", markdown_table(splits), "",
+        "## \u4e8b\u4ef6\u5916\u90e8\u8986\u76d6", "", markdown_table(coverage), "",
         "## \u51bb\u7ed3 Profile \u8fb9\u754c", "", markdown_table(profiles), "",
-        "\u51bb\u7ed3 profile\u3001ECDF\u3001q75/q90/q99 \u548c\u6062\u590d\u9608\u503c\u5747\u4fdd\u6301\u53ea\u8bfb\u3001\u672a\u91cd\u65b0\u62df\u5408\u3002`thresholds_unchanged=true` \u8868\u793a\u78c1\u76d8\u4e0a\u7684\u51bb\u7ed3\u9608\u503c\u672a\u6539\u53d8\uff0c\u4e0d\u8868\u793a\u5b83\u4eec\u4e0e\u8bf7\u6c42\u7684\u8f83\u665a train_end \u517c\u5bb9\u3002", "",
+        "## Canonical L4 \u9608\u503c\u4e00\u81f4\u6027", "", markdown_table(canonical), "",
+        "Canonical \u9608\u503c\u6765\u81ea\u5df2\u6709 `l4_dimension_comparison.csv`\u3002\u5ba1\u8ba1\u53ea\u6bd4\u8f83\u91cd\u65b0\u52a0\u8f7d profile \u540e\u7684 q90/q99\uff0c\u4e0d\u8986\u76d6 canonical \u503c\u3001\u4e0d\u91cd\u62df profile \u6216 ECDF\u3002", "",
         "## Scaler", "", markdown_table(scalers), "",
-        "\u4ec5\u6539\u53d8 val_end \u65f6\uff0c\u8bad\u7ec3\u524d\u7f00\u76f8\u540c\uff0c\u56e0\u6b64 scaler mean/std \u9010\u5143\u7d20\u5b8c\u5168\u4e00\u81f4\uff1b\u4f46\u8be5\u8bad\u7ec3\u524d\u7f00\u4ecd\u4e0e\u51bb\u7ed3 profile \u7684 train_end \u76f8\u5dee 2\u3002", "",
+        "\u4ec5\u6539\u53d8 val_end \u65f6\uff0cscaler mean/std \u5fc5\u987b\u5b8c\u5168\u4e0d\u53d8\uff1b\u8bad\u7ec3\u524d\u7f00\u5fc5\u987b\u4e0e\u51bb\u7ed3 profile train_end \u4e00\u81f4\u3002", "",
         "## \u8282\u70b9\u4e0e\u8f93\u5165\u5408\u540c", "", markdown_table(features), "", f"\u8282\u70b9\u5ba1\u8ba1\u5171 {len(nodes)} \u884c\uff1bTyphoon flow/speed \u5747\u56fa\u5b9a\u4e3a 16 \u4e2a\u540c\u540d\u540c\u5e8f\u8282\u70b9\uff0cBridge \u4ec5\u6709 flow\u3002", "",
-        "## \u90e8\u5206\u6b63\u5f0f\u8f93\u51fa\u4fdd\u62a4", "", f"\u4fee\u590d\u524d\u540e\u5747\u4e3a {before_inventory['result_count']} \u4e2a result.json\u3001{before_inventory['file_count']} \u4e2a\u6587\u4ef6\u3001{before_inventory['total_bytes']} \u5b57\u8282\uff1bSHA256 \u5b8c\u6574\u6027\u7ed3\u679c\uff1a{partial_unchanged}\u3002", "",
+        "## \u90e8\u5206\u6b63\u5f0f\u8f93\u51fa\u4fdd\u62a4", "", f"\u4fee\u590d\u524d\u540e\u5747\u4e3a {before_inventory['result_count']} \u4e2a result.json\u3001{before_inventory['file_count']} \u4e2a\u6587\u4ef6\u3001{before_inventory['total_bytes']} \u5b57\u8282\uff1bSHA256 \u5b8c\u6574\u6027\uff1a{partial_unchanged}\u3002", "",
         "## \u963b\u65ad\u9879", "",
         *(["- " + blocker for blocker in blockers] if blockers else ["- \u65e0\u3002"]), "",
-        "\u6839\u636e\u505c\u6b62\u89c4\u5219\uff0c\u672c\u8f6e\u4e0d\u5c1d\u8bd5\u5176\u4ed6\u8fb9\u754c\u3001\u4e0d\u4fee\u6539\u51bb\u7ed3 profile\u3001\u4e0d\u8bad\u7ec3\u4efb\u4f55\u6a21\u578b\uff0c\u4e5f\u4e0d\u786e\u5b9a\u4efb\u4f55\u5019\u9009\u6a21\u578b\u3002",
+        "\u6839\u636e\u505c\u6b62\u89c4\u5219\uff0c\u672c\u8f6e\u4e0d\u5c1d\u8bd5\u5176\u4ed6\u8fb9\u754c\u3001\u4e0d\u4fee\u6539 canonical L4 \u8f93\u51fa\u3001\u4e0d\u8bad\u7ec3\u4efb\u4f55\u6a21\u578b\uff0c\u4e5f\u4e0d\u786e\u5b9a\u4efb\u4f55\u5019\u9009\u6a21\u578b\u3002",
     ]
-    (output_dir / "e_l4_2a_r_audit_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    report_name = "e_l4_2a_r2_audit_report.md" if is_r2 else "e_l4_2a_r_audit_report.md"
+    (output_dir / report_name).write_text("\n".join(report) + "\n", encoding="utf-8")
     print(json.dumps(decision, ensure_ascii=False))
     return decision
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
-    if getattr(args, "split_protocol", "legacy_frozen") == "final_event_external":
+    if getattr(args, "split_protocol", "legacy_frozen") in {
+        "final_event_external",
+        "profile_compatible_event_external",
+    }:
         return run_repair_audit(args)
     return run_legacy(args)
 def parse_args() -> argparse.Namespace:
@@ -642,7 +755,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-nodes", type=int, default=41)
     parser.add_argument("--history", type=int, default=12)
     parser.add_argument("--horizon", type=int, default=12)
-    parser.add_argument("--split-protocol", choices=["legacy_frozen", "final_event_external"], default="legacy_frozen")
+    parser.add_argument("--split-protocol", choices=["legacy_frozen", "final_event_external", "profile_compatible_event_external"], default="legacy_frozen")
     parser.add_argument("--formal-root", default=r"D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\formal")
     return parser.parse_args()
 
