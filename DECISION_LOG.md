@@ -137,3 +137,9 @@ Decision: accept the read-only R3 protocol repair and permit a separately contro
 The physical L4 space now preserves missing observations, and the model-input space uses a separate train-only node-median imputation copy. Canonical q90/q99 thresholds are exactly reproducible, including speed/efficiency. Missing truth remains excluded from L4 metrics rather than treated as zero or low speed. Split, event, profile, scaler, node and feature contracts all pass, and the legacy partial formal outputs remain untouched.
 
 E-L4-2B is not automatically started. Before any formal training, the future DCRNN/M1/M2/M3 runner must explicitly consume the same dual-space contract, save imputation metadata and masks, use identical profile-compatible event-external boundaries, and pass a no-training smoke audit. No final model has been selected.
+## Rejected gate: E-L4-2B-0 runner contract (2026-08-02)
+Decision: reject B-0 and do not run E-L4-2B-S.
+
+R3 established that the dual-space utilities can preserve physical missing values and create finite train-only model inputs. However, the actual DGCN and public DCRNN runners have not been migrated to that contract. They still use legacy zero-filling/split/scaler paths, and the required prediction-mask, imputation-metadata, checkpoint and NPZ schemas are incomplete. M2/M3 fairness contracts are also absent.
+
+This is an engineering integration blocker, not a failure of the L4 definition or a model-quality result. The next phase must minimally wire the existing runners to the R3 contract and rerun B-0 without training. B-S, formal seeds, model selection and scientific conclusions remain unauthorized.

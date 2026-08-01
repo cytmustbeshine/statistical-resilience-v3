@@ -3,7 +3,7 @@
 ## Research scope
 - The two-dimensional L4 statistical definition is frozen: flow lower-tail demand/service-volume deficit and speed lower-tail efficiency deficit remain separate.
 - Do not modify the model architecture, graph fusion, training loss, CVaR, uncertainty weighting, or conformal prediction until the corrected final forecasting protocol passes its stage gate.
-- E-L4-2A-R3 passed the missing-preserving physical-space and train-only model-input audit. E-L4-2B is permitted only as a separately controlled next phase after a no-training runner-contract smoke audit; no final model is selected and no training is automatic.
+- E-L4-2A-R3 passed, but E-L4-2B-0 runner-contract audit failed: existing DGCN/DCRNN runners still use legacy loader/split/scaler paths and lack the complete dual-space mask/imputation schemas. Repair the runners and rerun B-0 before any B-S training; no final model is selected.
 - Read `PROJECT_MEMORY.md`, `EXPERIMENT_LOG.md`, and `DECISION_LOG.md` before substantial project work.
 
 ## Git workflow

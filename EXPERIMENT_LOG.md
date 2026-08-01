@@ -143,3 +143,9 @@ No training was run. Added `load_ordered_univariate_series_physical()` for NaN-p
 R3 output: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r3`. Raw missing counts were Bridge flow 0, Rainstorm flow 0, Rainstorm speed 578, Typhoon flow 0, and Typhoon speed 146. The physical loader preserved those missing values, model inputs and scaled inputs were finite, imputation/scaler parameters were train-only, and the canonical L4 q90/q99 values were reproduced for all five dimensions.
 
 Verification: compilation passed; R3 tests 13/13 passed; complete unittest discovery 203/203 passed; pytest is unavailable. All seven CSV outputs, decision JSON and Markdown report reloaded successfully. Formal partial outputs stayed at 24 result.json files, 120 total files and 492153111 bytes with unchanged result hashes.
+## E-L4-2B-0 runner-contract audit (2026-08-02)
+No training was run. The audit constructed physical NaN-preserving and train-only-imputed model-input bundles for Bridge, Rainstorm and Typhoon, checked profile-compatible target splits, canonical L4 reproduction, node/timestamp contracts, and finite forward-only DGCN/DCRNN outputs.
+
+Result: B-0 failed. Existing DGCN and DCRNN runners still use legacy loaders/splits/scalers; prediction NPZ and checkpoint metadata do not yet expose the full R3 dual-space mask/imputation contract; M2/M3 runner fairness contracts are not implemented. The required next work is a separately controlled runner wiring repair, not B-S training.
+
+Verification: compilation passed; B-0 tests 5/5; complete unittest discovery 208/208; pytest unavailable. No backward or optimizer step was called. Formal partial outputs remained unchanged.
