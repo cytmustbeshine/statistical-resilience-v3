@@ -40,6 +40,33 @@ CHECKPOINT_METADATA_FIELDS = (
 )
 
 
+FINAL_EVENT_EXTERNAL_SPLITS = {
+    "bridge": {
+        "train_time_end_exclusive": 3110,
+        "val_time_end_exclusive": 4032,
+    },
+    "rainstorm": {
+        "train_time_end_exclusive": 7257,
+        "val_time_end_exclusive": 9676,
+    },
+    "typhoon": {
+        "train_time_end_exclusive": 2592,
+        "val_time_end_exclusive": 3194,
+    },
+}
+
+
+def final_event_external_split(dataset: str) -> dict[str, int]:
+    """Return a copy of the preregistered event-external split boundaries."""
+    key = str(dataset).strip().lower()
+    if key not in FINAL_EVENT_EXTERNAL_SPLITS:
+        raise ValueError(f"Unknown final event-external split dataset: {dataset}")
+    split = dict(FINAL_EVENT_EXTERNAL_SPLITS[key])
+    if split["train_time_end_exclusive"] >= split["val_time_end_exclusive"]:
+        raise RuntimeError(f"Invalid final event-external split for {key}")
+    return split
+
+
 def event_free_feature_contract() -> dict[str, object]:
     """Return the fixed input/loss restrictions for the E-L4-1 baseline."""
     return {

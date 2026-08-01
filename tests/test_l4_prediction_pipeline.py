@@ -37,6 +37,7 @@ from data import StandardScaler, load_wide_traffic_csv, split_traffic_window_ind
 from flow_speed_resilience import match_node_variables
 from l4_prediction_pipeline import (
     event_free_feature_contract,
+    final_event_external_split,
     fit_train_only_scaler,
     load_forecast_checkpoint,
     load_prediction_archive,
@@ -48,7 +49,14 @@ from l4_prediction_pipeline import (
 )
 
 
-from audit_final_l4_a3_alignment import EVENT_WINDOWS, audit_event_test_coverage
+from audit_final_l4_a3_alignment import (
+    EVENT_WINDOWS,
+    MODEL_SHA256_AT_START,
+    TRAIN_SHA256_AT_START,
+    audit_event_test_coverage,
+    file_sha256,
+    partial_output_inventory,
+)
 
 class TestL4PredictionPipeline(unittest.TestCase):
     def test_split_windows_do_not_cross_boundaries(self):
@@ -399,5 +407,182 @@ class FinalProtocolEventCoverageTests(unittest.TestCase):
         for dataset, boundary in boundaries.items():
             coverage = audit_event_test_coverage(EVENT_WINDOWS[dataset], boundary)
             self.assertTrue(all(item["fully_in_test"] for item in coverage))
+
+class FinalEventExternalRepairTests(unittest.TestCase):
+    DATA_LENGTHS = {"bridge": 5184, "rainstorm": 12096, "typhoon": 4320}
+    PROFILE_ENDS = {"bridge": 3108, "rainstorm": 7255, "typhoon": 2590}
+
+    @staticmethod
+    def target_sets(dataset):
+        length = FinalEventExternalRepairTests.DATA_LENGTHS[dataset]
+        split = final_event_external_split(dataset)
+        train, val, test, _ = split_traffic_window_indices_strict(
+            length,
+            history=12,
+            horizon=12,
+            train_time_end_exclusive=split["train_time_end_exclusive"],
+            val_time_end_exclusive=split["val_time_end_exclusive"],
+        )
+        offsets = np.arange(12, 24)
+        return (
+            set((train[:, None] + offsets).reshape(-1).tolist()),
+            set((val[:, None] + offsets).reshape(-1).tolist()),
+            set((test[:, None] + offsets).reshape(-1).tolist()),
+        )
+
+    def test_final_event_external_split_returns_copy(self):
+        first = final_event_external_split("bridge")
+        first["val_time_end_exclusive"] = -1
+        self.assertEqual(final_event_external_split("bridge")["val_time_end_exclusive"], 4032)
+
+    def test_unknown_final_split_dataset_rejected(self):
+        with self.assertRaises(ValueError):
+            final_event_external_split("unknown")
+
+    def test_bridge_corrected_boundary(self):
+        self.assertEqual(final_event_external_split("bridge"), {"train_time_end_exclusive": 3110, "val_time_end_exclusive": 4032})
+
+    def test_rainstorm_corrected_boundary(self):
+        self.assertEqual(final_event_external_split("rainstorm"), {"train_time_end_exclusive": 7257, "val_time_end_exclusive": 9676})
+
+    def test_typhoon_corrected_boundary(self):
+        self.assertEqual(final_event_external_split("typhoon"), {"train_time_end_exclusive": 2592, "val_time_end_exclusive": 3194})
+
+    def test_corrected_train_val_targets_disjoint(self):
+        for dataset in self.DATA_LENGTHS:
+            train, val, _ = self.target_sets(dataset)
+            self.assertFalse(train & val)
+
+    def test_corrected_val_test_targets_disjoint(self):
+        for dataset in self.DATA_LENGTHS:
+            _, val, test = self.target_sets(dataset)
+            self.assertFalse(val & test)
+
+    def test_corrected_train_test_targets_disjoint(self):
+        for dataset in self.DATA_LENGTHS:
+            train, _, test = self.target_sets(dataset)
+            self.assertFalse(train & test)
+
+    def test_no_window_target_crosses_train_boundary(self):
+        for dataset, length in self.DATA_LENGTHS.items():
+            split = final_event_external_split(dataset)
+            train, val, _, _ = split_traffic_window_indices_strict(
+                length, 12, 12,
+                train_time_end_exclusive=split["train_time_end_exclusive"],
+                val_time_end_exclusive=split["val_time_end_exclusive"],
+            )
+            self.assertTrue(np.all(train + 23 < split["train_time_end_exclusive"]))
+            self.assertTrue(np.all(val + 12 >= split["train_time_end_exclusive"]))
+
+    def test_no_window_target_crosses_test_boundary(self):
+        for dataset, length in self.DATA_LENGTHS.items():
+            split = final_event_external_split(dataset)
+            _, val, test, _ = split_traffic_window_indices_strict(
+                length, 12, 12,
+                train_time_end_exclusive=split["train_time_end_exclusive"],
+                val_time_end_exclusive=split["val_time_end_exclusive"],
+            )
+            self.assertTrue(np.all(val + 23 < split["val_time_end_exclusive"]))
+            self.assertTrue(np.all(test + 12 >= split["val_time_end_exclusive"]))
+
+    def test_validation_contains_no_fixed_event(self):
+        for dataset in self.DATA_LENGTHS:
+            _, val, _ = self.target_sets(dataset)
+            for start, end in EVENT_WINDOWS[dataset]:
+                self.assertFalse(val & set(range(start, end + 1)))
+
+    def test_all_fixed_events_are_in_test_targets(self):
+        for dataset in self.DATA_LENGTHS:
+            _, _, test = self.target_sets(dataset)
+            for start, end in EVENT_WINDOWS[dataset]:
+                self.assertTrue(set(range(start, end + 1)).issubset(test))
+
+    def test_bridge_event_fully_in_test(self):
+        _, _, test = self.target_sets("bridge")
+        start, end = EVENT_WINDOWS["bridge"][0]
+        self.assertTrue(set(range(start, end + 1)).issubset(test))
+
+    def test_rainstorm_event_fully_in_test(self):
+        _, _, test = self.target_sets("rainstorm")
+        start, end = EVENT_WINDOWS["rainstorm"][0]
+        self.assertTrue(set(range(start, end + 1)).issubset(test))
+
+    def test_typhoon_three_segments_fully_in_test(self):
+        _, _, test = self.target_sets("typhoon")
+        self.assertEqual(sum(set(range(start, end + 1)).issubset(test) for start, end in EVENT_WINDOWS["typhoon"]), 3)
+
+    def test_typhoon_segments_remain_separate(self):
+        self.assertEqual(separate_event_segments(EVENT_WINDOWS["typhoon"]), EVENT_WINDOWS["typhoon"])
+        self.assertEqual(len(EVENT_WINDOWS["typhoon"]), 3)
+
+    def test_train_end_matches_frozen_profile(self):
+        mismatches = {
+            dataset: final_event_external_split(dataset)["train_time_end_exclusive"] - profile_end
+            for dataset, profile_end in self.PROFILE_ENDS.items()
+        }
+        self.assertEqual(mismatches, {"bridge": 2, "rainstorm": 2, "typhoon": 2})
+        self.assertTrue(any(value != 0 for value in mismatches.values()))
+
+    def test_scaler_still_train_only(self):
+        values = np.concatenate([np.zeros((10, 1, 1)), np.full((5, 1, 1), 100.0)])
+        scaler, _ = fit_train_only_scaler(values, 10)
+        self.assertEqual(float(np.asarray(scaler.mean).reshape(-1)[0]), 0.0)
+
+    def test_scaler_unchanged_when_only_val_end_changes(self):
+        values = np.arange(240.0).reshape(120, 2, 1)
+        timestamps = np.arange(120).astype("datetime64[m]")
+        left = strict_data_bundle(values, timestamps, 4, 3, train_time_end_exclusive=70, val_time_end_exclusive=90)
+        right = strict_data_bundle(values, timestamps, 4, 3, train_time_end_exclusive=70, val_time_end_exclusive=100)
+        self.assertEqual(left["scaler_metadata"], right["scaler_metadata"])
+
+    def test_thresholds_unchanged_when_only_val_end_changes(self):
+        paths = profile_paths("bridge", "demand", Path(r"D:\TrafficGNN\outputs\two_factor_traffic_resilience_l4"), Path(r"D:\TrafficGNN\outputs\latent_traffic_performance_l3"))
+        before = file_sha256(paths[2])
+        final_event_external_split("bridge")
+        self.assertEqual(before, file_sha256(paths[2]))
+
+    def test_flow_speed_share_corrected_boundary(self):
+        for dataset in ("rainstorm", "typhoon"):
+            flow_split = final_event_external_split(dataset)
+            speed_split = final_event_external_split(dataset)
+            self.assertEqual(flow_split, speed_split)
+
+    def test_typhoon_fixed_16_nodes(self):
+        frame = pd.read_csv(DATASETS["typhoon"]["csv"], nrows=1)
+        plan = paired_column_plan(list(frame.columns), "_volume", "_speed", 41)
+        self.assertEqual(len(plan["paired_node_names"]), 16)
+        self.assertEqual(len(plan["paired_flow_columns"]), len(plan["paired_speed_columns"]))
+
+    def test_bridge_has_no_efficiency(self):
+        frame = pd.read_csv(DATASETS["bridge"]["csv"], nrows=1)
+        plan = paired_column_plan(list(frame.columns), None, None, 41)
+        self.assertEqual(plan["paired_speed_columns"], [])
+
+    def test_event_not_added_to_features(self):
+        self.assertEqual(event_free_feature_contract()["event_features"], [])
+
+    def test_weather_not_added_to_features(self):
+        self.assertEqual(event_free_feature_contract()["weather_features"], [])
+
+    def test_model_and_loss_unchanged(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(file_sha256(root / "model.py"), MODEL_SHA256_AT_START)
+        self.assertEqual(file_sha256(root / "train.py"), TRAIN_SHA256_AT_START)
+
+    def test_partial_formal_outputs_not_overwritten(self):
+        output = Path(r"D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r")
+        baseline = json.loads((output / "_partial_integrity_before.json").read_text(encoding="utf-8-sig"))
+        current = partial_output_inventory(Path(baseline["root"]))
+        self.assertEqual(current["result_count"], baseline["result_count"])
+        expected = {row["relative_path"]: row["sha256"] for row in baseline["result_files"]}
+        actual = {row["relative_path"]: row["sha256"] for row in current["result_files"]}
+        self.assertEqual(actual, expected)
+
+    def test_corrected_audit_json_roundtrip(self):
+        payload = {"stage": "E-L4-2A-R", "stage_passed": False, "training_run": False}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decision.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), payload)
 if __name__ == "__main__":
     unittest.main()

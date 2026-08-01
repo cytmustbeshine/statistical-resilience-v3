@@ -119,3 +119,13 @@ The audit was rerun with explicit per-event test coverage. Existing checks passe
 A formal command using three seeds, 20 epochs and four neural models had begun before the coverage defect was discovered. It was stopped after 24/60 completed result files. No stderr failure occurred, but the protocol itself is invalid for the requested final event comparison. Partial outputs were preserved outside Git and are explicitly non-scientific.
 
 Verification after correction: `py_compile` passed; `tests.test_l4_prediction_pipeline` passed 38 tests, including two new event-coverage tests. The complete existing suite passed 142 unittest tests. `pytest` remains unavailable (`No module named pytest`). Stage B was not completed, analyzed, committed or accepted.
+## E-L4-2A-R final event-external boundary audit (2026-08-01)
+Environment: Windows PowerShell, `D:\soft\Python310\python.exe`, branch `main`, start commit `c1d6da0`, seed not applicable, no training run.
+
+Command: `python audit_final_l4_a3_alignment.py --split-protocol final_event_external --output-dir D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2a_r`.
+
+Outputs: ten required repair-audit artifacts under `e_l4_2a_r`. All CSV/JSON/Markdown artifacts were reloaded successfully. Event coverage passed for Bridge 127/127, Rainstorm 237/237, and three separate Typhoon segments at 237/237 each. All event train/validation counts are zero. Scaler mean/std are unchanged when only val_end changes, inverse roundtrips pass, thresholds and frozen profile files were not changed, Typhoon remains fixed at 16 matched nodes, and Bridge remains flow-only.
+
+Failure: requested train ends 3110/7257/2592 differ by +2 from frozen profile train ends 3108/7255/2590. The audit therefore returned `stage_passed=false`, `e_l4_2b_authorized=false`, and stopped. No DCRNN or DSTSGCN process was trained. The 24 partial `result.json` hashes, 120-file count and 492153111-byte formal directory total were unchanged.
+
+Verification: four-file compilation passed; pipeline unittest 66/66 passed; full unittest 170/170 passed in 2.532 seconds. Pytest invocation failed because the module is not installed; this is not recorded as pytest success.
