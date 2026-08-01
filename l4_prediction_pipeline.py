@@ -39,6 +39,11 @@ CHECKPOINT_METADATA_FIELDS = (
     "event_features",
 )
 
+LEGACY_MISSING_SPACE_PROTOCOL = "legacy_zero_filled"
+DUAL_SPACE_MISSING_PROTOCOL = "dual_space_train_only_median"
+LEGACY_SPLIT_PROTOCOL = "legacy_frozen"
+PROFILE_COMPATIBLE_SPLIT_PROTOCOL = "profile_compatible_event_external"
+
 
 FINAL_EVENT_EXTERNAL_SPLITS = {
     "bridge": {
@@ -315,6 +320,64 @@ def strict_data_bundle(
     }
 
 
+def target_tensor_from_indices(
+    values: np.ndarray,
+    window_indices: np.ndarray,
+    history: int,
+    horizon: int,
+) -> np.ndarray:
+    """Return physical or scaled target tensors for explicit window starts."""
+    array = np.asarray(values, dtype=float)
+    indices = np.asarray(window_indices, dtype=int)
+    if array.ndim != 3:
+        raise ValueError("values must have shape [time,nodes,features]")
+    offsets = np.arange(int(history), int(history) + int(horizon), dtype=int)
+    target_rows = indices[:, None] + offsets[None, :]
+    if target_rows.size and (target_rows.min() < 0 or target_rows.max() >= len(array)):
+        raise ValueError("target window is outside the value array")
+    return array[target_rows]
+
+
+def prepare_dual_space_bundle(
+    physical_values: np.ndarray,
+    timestamps: np.ndarray,
+    history: int,
+    horizon: int,
+    train_time_end_exclusive: int,
+    val_time_end_exclusive: int,
+) -> dict[str, object]:
+    """Prepare NaN-preserving physical truth plus finite train-only model inputs.
+
+    The physical array is never modified and remains the source for L4 truth and
+    metric masks. The model copy is filled only with medians fitted on the
+    training prefix, then scaled on the same training prefix.
+    """
+    physical = np.asarray(physical_values, dtype=float)
+    physical_before = physical.copy()
+    model_values, imputation = impute_model_inputs_train_only(
+        physical,
+        train_time_end_exclusive,
+    )
+    bundle = strict_data_bundle(
+        model_values,
+        timestamps,
+        history,
+        horizon,
+        train_time_end_exclusive=train_time_end_exclusive,
+        val_time_end_exclusive=val_time_end_exclusive,
+    )
+    return {
+        "physical_values": physical,
+        "model_values": model_values,
+        "bundle": bundle,
+        "imputation_metadata": imputation,
+        "physical_valid_mask": np.isfinite(physical),
+        "physical_space_missing_preserved": bool(np.array_equal(np.isnan(physical), np.isnan(physical_before))),
+        "missing_space_protocol": DUAL_SPACE_MISSING_PROTOCOL,
+        "split_protocol": PROFILE_COMPATIBLE_SPLIT_PROTOCOL,
+    }
+
+
 def validate_checkpoint_metadata(metadata: Mapping[str, object]) -> None:
     """Validate the metadata needed for physical-space reproducibility."""
     missing = [field for field in CHECKPOINT_METADATA_FIELDS if field not in metadata]
@@ -325,6 +388,27 @@ def validate_checkpoint_metadata(metadata: Mapping[str, object]) -> None:
     if list(metadata["input_features"]) != ["traffic"]:
         raise ValueError("E-L4 checkpoint must use traffic-only input")
     scaler_from_metadata(metadata["scaler"])
+    if metadata.get("missing_space_protocol") == DUAL_SPACE_MISSING_PROTOCOL:
+        imputation = metadata.get("imputation")
+        if not isinstance(imputation, Mapping):
+            raise ValueError("Dual-space checkpoint metadata must include imputation details")
+        required = {
+            "method",
+            "train_time_end_exclusive",
+            "node_medians",
+            "global_median",
+            "raw_missing_count",
+            "model_missing_count",
+        }
+        missing_imputation = sorted(required.difference(imputation))
+        if missing_imputation:
+            raise ValueError(f"Dual-space imputation metadata is missing fields: {missing_imputation}")
+        if imputation["method"] != "train_only_node_median":
+            raise ValueError("Unsupported dual-space imputation method")
+        if int(imputation["train_time_end_exclusive"]) != int(metadata["train_time_end_exclusive"]):
+            raise ValueError("Imputation train boundary differs from checkpoint split")
+        if metadata.get("split_protocol") != PROFILE_COMPATIBLE_SPLIT_PROTOCOL:
+            raise ValueError("Dual-space checkpoint must use the profile-compatible split protocol")
 
 
 def save_forecast_checkpoint(
@@ -394,6 +478,11 @@ def save_prediction_archive(
     val_time_end_exclusive: int,
     scaler: Mapping[str, object],
     seed: int,
+    missing_space_protocol: str = LEGACY_MISSING_SPACE_PROTOCOL,
+    split_protocol: str = LEGACY_SPLIT_PROTOCOL,
+    imputation: Mapping[str, object] | None = None,
+    physical_truth_valid_mask: np.ndarray | None = None,
+    l4_valid_mask: np.ndarray | None = None,
 ) -> None:
     """Save aligned multi-horizon predictions in one reloadable NPZ artifact."""
     _, horizon, _ = validate_prediction_arrays(
@@ -406,6 +495,21 @@ def save_prediction_archive(
     )
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    truth_mask = (
+        np.isfinite(y_true_physical)
+        if physical_truth_valid_mask is None
+        else np.asarray(physical_truth_valid_mask, dtype=bool)
+    )
+    l4_mask = truth_mask if l4_valid_mask is None else np.asarray(l4_valid_mask, dtype=bool)
+    if truth_mask.shape != np.asarray(y_true_physical).shape:
+        raise ValueError("physical_truth_valid_mask must match y_true_physical shape")
+    if l4_mask.shape != np.asarray(y_true_physical).shape:
+        raise ValueError("l4_valid_mask must match y_true_physical shape")
+    if missing_space_protocol == DUAL_SPACE_MISSING_PROTOCOL:
+        if imputation is None:
+            raise ValueError("Dual-space prediction archives require imputation metadata")
+        if int(imputation.get("train_time_end_exclusive", -1)) != int(train_time_end_exclusive):
+            raise ValueError("Archive imputation boundary differs from split metadata")
     np.savez_compressed(
         destination,
         dataset=np.asarray(dataset),
@@ -421,6 +525,11 @@ def save_prediction_archive(
         train_time_end_exclusive=np.asarray(train_time_end_exclusive),
         val_time_end_exclusive=np.asarray(val_time_end_exclusive),
         scaler_metadata_json=np.asarray(json.dumps(dict(scaler), sort_keys=True)),
+        missing_space_protocol=np.asarray(missing_space_protocol),
+        split_protocol=np.asarray(split_protocol),
+        imputation_metadata_json=np.asarray(json.dumps(dict(imputation or {}), sort_keys=True)),
+        physical_truth_valid_mask=truth_mask,
+        l4_valid_mask=l4_mask,
         seed=np.asarray(seed),
     )
 
@@ -430,4 +539,6 @@ def load_prediction_archive(path: str | Path) -> dict[str, object]:
     with np.load(Path(path), allow_pickle=False) as archive:
         payload = {key: np.asarray(archive[key]) for key in archive.files}
     payload["scaler_metadata"] = json.loads(str(payload.pop("scaler_metadata_json")))
+    if "imputation_metadata_json" in payload:
+        payload["imputation_metadata"] = json.loads(str(payload.pop("imputation_metadata_json")))
     return payload

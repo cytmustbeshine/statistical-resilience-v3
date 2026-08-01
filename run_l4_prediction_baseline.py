@@ -23,14 +23,22 @@ from l4_prediction_evaluation import (
     regression_metrics,
 )
 from l4_prediction_pipeline import (
+    DUAL_SPACE_MISSING_PROTOCOL,
+    LEGACY_MISSING_SPACE_PROTOCOL,
+    LEGACY_SPLIT_PROTOCOL,
+    PROFILE_COMPATIBLE_SPLIT_PROTOCOL,
     event_free_feature_contract,
     load_forecast_checkpoint,
     load_ordered_univariate_series,
+    load_ordered_univariate_series_physical,
     load_prediction_archive,
     paired_column_plan,
+    prepare_dual_space_bundle,
+    profile_compatible_event_external_split,
     save_forecast_checkpoint,
     save_prediction_archive,
     strict_data_bundle,
+    target_tensor_from_indices,
 )
 from model import DSTSGCN
 from train import run_epoch, set_seed
@@ -105,21 +113,49 @@ def prepare_variable(dataset, variable, args):
     config, full_columns, model_columns, full_indices, label, profile_root = variable_plan(
         dataset, variable, args.max_nodes
     )
-    full_values, timestamps, full_names = load_ordered_univariate_series(
-        str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"]
-    )
-    selected = full_values[:, full_indices, :]
-    usable_windows = max(len(full_values) - args.history - args.horizon + 1, 0)
-    frozen_train_end = min(int(usable_windows * 0.6) + args.history, len(full_values))
-    frozen_val_end = min(int(usable_windows * 0.8) + args.history, len(full_values))
-    bundle = strict_data_bundle(
-        selected,
-        timestamps,
-        args.history,
-        args.horizon,
-        train_time_end_exclusive=frozen_train_end,
-        val_time_end_exclusive=frozen_val_end,
-    )
+    if args.missing_space_protocol == DUAL_SPACE_MISSING_PROTOCOL:
+        if args.split_protocol != PROFILE_COMPATIBLE_SPLIT_PROTOCOL:
+            raise ValueError("dual-space formal runs require the profile-compatible split protocol")
+        full_values, timestamps, full_names = load_ordered_univariate_series_physical(
+            str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"]
+        )
+        selected = full_values[:, full_indices, :]
+        split = profile_compatible_event_external_split(dataset)
+        dual = prepare_dual_space_bundle(
+            selected,
+            timestamps,
+            args.history,
+            args.horizon,
+            train_time_end_exclusive=int(split["train_time_end_exclusive"]),
+            val_time_end_exclusive=int(split["val_time_end_exclusive"]),
+        )
+        bundle = dual["bundle"]
+        selected_physical = selected
+        imputation_metadata = dual["imputation_metadata"]
+        physical_valid_mask = dual["physical_valid_mask"]
+        split_protocol = PROFILE_COMPATIBLE_SPLIT_PROTOCOL
+        missing_space_protocol = DUAL_SPACE_MISSING_PROTOCOL
+    else:
+        full_values, timestamps, full_names = load_ordered_univariate_series(
+            str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"]
+        )
+        selected = full_values[:, full_indices, :]
+        usable_windows = max(len(full_values) - args.history - args.horizon + 1, 0)
+        frozen_train_end = min(int(usable_windows * 0.6) + args.history, len(full_values))
+        frozen_val_end = min(int(usable_windows * 0.8) + args.history, len(full_values))
+        bundle = strict_data_bundle(
+            selected,
+            timestamps,
+            args.history,
+            args.horizon,
+            train_time_end_exclusive=frozen_train_end,
+            val_time_end_exclusive=frozen_val_end,
+        )
+        selected_physical = selected
+        imputation_metadata = None
+        physical_valid_mask = np.isfinite(selected)
+        split_protocol = LEGACY_SPLIT_PROTOCOL
+        missing_space_protocol = LEGACY_MISSING_SPACE_PROTOCOL
     train_end = int(bundle["split_info"]["train_time_end_exclusive"])
     profile_dir = (
         Path(args.l4_dir) / dataset
@@ -141,6 +177,7 @@ def prepare_variable(dataset, variable, args):
     return {
         "config": config,
         "full_values": full_values,
+        "selected_physical_values": selected_physical,
         "timestamps": timestamps,
         "full_names": full_names,
         "model_columns": model_columns,
@@ -149,6 +186,10 @@ def prepare_variable(dataset, variable, args):
         "bundle": bundle,
         "profile": profile,
         "reference": reference,
+        "imputation_metadata": imputation_metadata,
+        "physical_valid_mask": physical_valid_mask,
+        "missing_space_protocol": missing_space_protocol,
+        "split_protocol": split_protocol,
     }
 
 
@@ -203,7 +244,12 @@ def train_one(dataset, variable, args):
             raw_mean, raw_std, device,
         )
         val_true_scaled, val_pred_scaled = collect_predictions(model, val_loader, static_adj, device)
-        val_true = bundle["scaler"].inverse_transform(val_true_scaled)
+        if prepared["missing_space_protocol"] == DUAL_SPACE_MISSING_PROTOCOL:
+            val_true = target_tensor_from_indices(
+                prepared["selected_physical_values"], val_indices, args.history, args.horizon
+            )
+        else:
+            val_true = bundle["scaler"].inverse_transform(val_true_scaled)
         val_pred = bundle["scaler"].inverse_transform(val_pred_scaled)
         val_metrics = regression_metrics(val_true, val_pred)
         history_rows.append({"epoch": epoch, "train_loss": train_stats["loss"], "val_mae": val_metrics["mae"]})
@@ -231,9 +277,15 @@ def train_one(dataset, variable, args):
         "input_features": contract["input_features"],
         "event_features": contract["event_features"],
         "weather_features": contract["weather_features"],
+        "split_protocol": prepared["split_protocol"],
+        "missing_space_protocol": prepared["missing_space_protocol"],
         "model_config": {"hidden_dim": args.hidden_dim, "num_blocks": args.num_blocks, "graph_learner_type": "lmln", "fusion_type": "quality"},
         "smoke_limits": {"train_windows": len(train_indices), "validation_windows": len(val_indices), "test_windows": len(test_indices)},
     }
+    if prepared["imputation_metadata"] is not None:
+        metadata["imputation"] = prepared["imputation_metadata"]
+        metadata["raw_missing_count"] = int(prepared["imputation_metadata"]["raw_missing_count"])
+        metadata["model_missing_count"] = int(prepared["imputation_metadata"]["model_missing_count"])
     save_forecast_checkpoint(checkpoint_path, best_state, metadata)
     loaded_checkpoint = load_forecast_checkpoint(checkpoint_path)
     model.load_state_dict(loaded_checkpoint["model_state_dict"])
@@ -241,7 +293,12 @@ def train_one(dataset, variable, args):
     y_true_scaled, y_pred_scaled = collect_predictions(model, test_loader, static_adj, device)
     if not np.isfinite(y_pred_scaled).all():
         raise RuntimeError(f"non-finite neural prediction for {dataset}/{variable}")
-    y_true = bundle["scaler"].inverse_transform(y_true_scaled)
+    if prepared["missing_space_protocol"] == DUAL_SPACE_MISSING_PROTOCOL:
+        y_true = target_tensor_from_indices(
+            prepared["selected_physical_values"], test_indices, args.history, args.horizon
+        )
+    else:
+        y_true = bundle["scaler"].inverse_transform(y_true_scaled)
     y_pred = bundle["scaler"].inverse_transform(y_pred_scaled)
     persistence_scaled = persistence_forecast(bundle["scaled_values"], test_indices, args.history, args.horizon)
     persistence = bundle["scaler"].inverse_transform(persistence_scaled)
@@ -264,6 +321,11 @@ def train_one(dataset, variable, args):
         val_time_end_exclusive=int(split_info["val_time_end_exclusive"]),
         scaler=bundle["scaler_metadata"],
         seed=args.seed,
+        missing_space_protocol=prepared["missing_space_protocol"],
+        split_protocol=prepared["split_protocol"],
+        imputation=prepared["imputation_metadata"],
+        physical_truth_valid_mask=np.isfinite(y_true),
+        l4_valid_mask=np.isfinite(y_true),
     )
     archive = load_prediction_archive(archive_path)
     if archive["target_timestamps"].shape != target_timestamps.shape:
@@ -427,6 +489,16 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-train-windows", type=int, default=0)
     parser.add_argument("--max-eval-windows", type=int, default=0)
+    parser.add_argument(
+        "--split-protocol",
+        choices=[LEGACY_SPLIT_PROTOCOL, PROFILE_COMPATIBLE_SPLIT_PROTOCOL],
+        default=LEGACY_SPLIT_PROTOCOL,
+    )
+    parser.add_argument(
+        "--missing-space-protocol",
+        choices=[LEGACY_MISSING_SPACE_PROTOCOL, DUAL_SPACE_MISSING_PROTOCOL],
+        default=LEGACY_MISSING_SPACE_PROTOCOL,
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return parser.parse_args()
 

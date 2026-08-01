@@ -142,3 +142,10 @@ The read-only formal runner audit was executed after R3. The dual-space data uti
 The stage failed because the existing formal runners are not wired to the R3 contract. `run_l4_prediction_baseline.py` still uses the legacy zero-filling loader and legacy derived split; the public DCRNN runner uses `load_wide_traffic_csv`, `SplitScaler` and its own split path; evaluation and checkpoint/NPZ schemas do not yet carry the required dual-space masks and imputation metadata; and M2/M3 formal runner contracts are not implemented. Therefore no B-S smoke training was run. `stage_passed=false` and `e_l4_2b_training_authorized=false`.
 
 B-0 forward-only checks were finite for Bridge/Rainstorm/Typhoon flow/speed smoke tensors. Complete unittest discovery passed 208 tests; pytest is unavailable. No model or train file was modified and the 24 partial formal result files remain protected.
+
+## E-L4-2B-0R runner-contract repair (2026-08-02)
+The formal runner wiring blocker is repaired and B-0 now passes without training. The DGCN runner and public DCRNN runner both expose explicit opt-in R3 arguments for `profile_compatible_event_external` split and `dual_space_train_only_median` missing-space handling while preserving their legacy defaults. Event/weather inputs remain excluded in the dual-space contract.
+
+The shared pipeline now exports imputation metadata and physical/L4 valid masks through checkpoint and prediction NPZ schemas. Evaluation can load NaN-preserving physical truth for dual-space archives. B-0 re-audit reports `stage_passed=true`, `e_l4_2b_training_authorized=true`, `training_run=false`, `optimizer_step_called=false`, `backward_called=false`, and `blockers=[]`.
+
+No E-L4-2B-S smoke training, DCRNN training, M1/M2/M3 training, CVaR run, model selection, or thesis conclusion was performed in this repair. `model.py`, `train.py`, the frozen L4 definition, profiles, ECDFs, q90/q99 and recovery thresholds remain unchanged. The 24 partial formal result files remain byte-for-byte protected.

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Subset
 
@@ -22,6 +23,19 @@ from data import (
     read_csv_with_fallback,
     resolve_time_index,
     split_traffic_window_indices,
+    split_traffic_window_indices_strict,
+)
+from l4_prediction_pipeline import (
+    DUAL_SPACE_MISSING_PROTOCOL,
+    LEGACY_MISSING_SPACE_PROTOCOL,
+    LEGACY_SPLIT_PROTOCOL,
+    PROFILE_COMPATIBLE_SPLIT_PROTOCOL,
+    event_free_feature_contract,
+    fit_train_only_scaler,
+    impute_model_inputs_train_only,
+    load_ordered_univariate_series_physical,
+    profile_compatible_event_external_split,
+    scaler_metadata,
 )
 from baselines.dcrnn_resilience_official_adapted.model import OfficialAdaptedDCRNN
 
@@ -32,6 +46,34 @@ def parse_csv_list(value: str) -> list[str]:
 
 def parse_optional_suffix(value: str) -> str | None:
     return None if value.strip().lower() in {"", "none", "null"} else value.strip()
+
+
+def resolve_value_columns(
+    csv_path: str,
+    time_col: str,
+    value_suffix: str | None,
+    exclude_cols: list[str],
+    max_nodes: int | None,
+    value_columns: str,
+) -> list[str]:
+    explicit = parse_csv_list(value_columns)
+    if explicit:
+        return explicit[:max_nodes] if max_nodes is not None else explicit
+    frame = read_csv_with_fallback(csv_path)
+    exclude = set(exclude_cols)
+    columns: list[str] = []
+    for column in frame.columns:
+        if column == time_col or column in exclude:
+            continue
+        if value_suffix and not str(column).endswith(value_suffix):
+            continue
+        if pd.api.types.is_numeric_dtype(frame[column]):
+            columns.append(str(column))
+    if max_nodes is not None:
+        columns = columns[:max_nodes]
+    if not columns:
+        raise ValueError("No traffic value columns were resolved for DCRNN input")
+    return columns
 
 
 def set_seed(seed: int) -> None:
@@ -182,6 +224,16 @@ def main() -> int:
     parser.add_argument("--cl-decay-steps", type=int, default=2000)
     parser.add_argument("--disable-curriculum-learning", action="store_true")
     parser.add_argument("--protocol", choices=["fair", "official"], default="fair")
+    parser.add_argument(
+        "--split-protocol",
+        choices=[LEGACY_SPLIT_PROTOCOL, PROFILE_COMPATIBLE_SPLIT_PROTOCOL],
+        default=LEGACY_SPLIT_PROTOCOL,
+    )
+    parser.add_argument(
+        "--missing-space-protocol",
+        choices=[LEGACY_MISSING_SPACE_PROTOCOL, DUAL_SPACE_MISSING_PROTOCOL],
+        default=LEGACY_MISSING_SPACE_PROTOCOL,
+    )
     parser.add_argument("--split-mode", choices=["chronological", "event_aware", "event_aligned"], default="chronological")
     parser.add_argument("--explicit-event-time", default="")
     parser.add_argument("--event-test-prehistory-steps", type=int, default=None)
@@ -194,6 +246,7 @@ def main() -> int:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--event-col", default="")
     parser.add_argument("--exclude-cols", default="ID,id")
+    parser.add_argument("--value-columns", default="")
     parser.add_argument("--extra-feature-cols", default="")
     parser.add_argument("--node-feature-suffixes", default="")
     parser.add_argument("--add-time-features", action="store_true")
@@ -206,29 +259,73 @@ def main() -> int:
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     dataset_name = args.dataset_name or infer_dataset_name(args.csv)
-    raw, nodes, feature_names = load_wide_traffic_csv(
-        args.csv,
-        value_suffix=parse_optional_suffix(args.value_suffix),
-        time_col=args.time_col,
-        max_nodes=args.max_nodes,
-        extra_feature_cols=parse_csv_list(args.extra_feature_cols),
-        node_feature_suffixes=parse_csv_list(args.node_feature_suffixes),
-        add_time_features=args.add_time_features,
-        exclude_cols=parse_csv_list(args.exclude_cols),
-        return_feature_names=True,
-    )
-    train_time_end = int(len(raw) * (0.7 if args.protocol == "official" else 0.6))
-    scaler = SplitScaler(num_traffic_features=1)
-    scaler.fit(raw[:train_time_end])
-    scaled = scaler.transform(raw)
+
+    dual_space = args.missing_space_protocol == DUAL_SPACE_MISSING_PROTOCOL
+    imputation_metadata = None
+    if dual_space:
+        if args.split_protocol != PROFILE_COMPATIBLE_SPLIT_PROTOCOL:
+            raise ValueError("dual-space DCRNN runs require the profile-compatible split protocol")
+        if args.event_col or args.extra_feature_cols or args.node_feature_suffixes or args.add_time_features:
+            raise ValueError("dual-space DCRNN contract excludes event, weather, node-extra and time features")
+        columns = resolve_value_columns(
+            args.csv,
+            args.time_col,
+            parse_optional_suffix(args.value_suffix),
+            parse_csv_list(args.exclude_cols),
+            args.max_nodes,
+            args.value_columns,
+        )
+        raw, _, nodes = load_ordered_univariate_series_physical(
+            args.csv,
+            args.time_col,
+            columns,
+            parse_optional_suffix(args.value_suffix),
+        )
+        split = profile_compatible_event_external_split(dataset_name)
+        train_time_end = int(split["train_time_end_exclusive"])
+        val_time_end = int(split["val_time_end_exclusive"])
+        model_raw, imputation_metadata = impute_model_inputs_train_only(raw, train_time_end)
+        scaler, scaled = fit_train_only_scaler(model_raw, train_time_end)
+        feature_names = ["traffic"]
+    else:
+        raw, nodes, feature_names = load_wide_traffic_csv(
+            args.csv,
+            value_suffix=parse_optional_suffix(args.value_suffix),
+            time_col=args.time_col,
+            max_nodes=args.max_nodes,
+            extra_feature_cols=parse_csv_list(args.extra_feature_cols),
+            node_feature_suffixes=parse_csv_list(args.node_feature_suffixes),
+            add_time_features=args.add_time_features,
+            exclude_cols=parse_csv_list(args.exclude_cols),
+            return_feature_names=True,
+        )
+        train_time_end = int(len(raw) * (0.7 if args.protocol == "official" else 0.6))
+        val_time_end = None
+        scaler = SplitScaler(num_traffic_features=1)
+        scaler.fit(raw[:train_time_end])
+        scaled = scaler.transform(raw)
     adj_np = build_static_adjacency(
         scaled[:train_time_end], nodes, source=args.adj_source,
         corr_threshold=args.corr_threshold, adj_path=args.adj_path or None,
     )
     adj = torch.tensor(adj_np, dtype=torch.float32, device=args.device)
     dataset = TrafficWindowDataset(scaled, history=args.history_steps, horizon=args.horizon, target_dim=0)
-    event_series = load_event_series(args.csv, args.time_col, args.event_col)
-    if args.protocol == "official":
+    event_series = None if dual_space else load_event_series(args.csv, args.time_col, args.event_col)
+    if dual_space:
+        train_indices, val_indices, test_indices, split_info = split_traffic_window_indices_strict(
+            len(raw),
+            args.history_steps,
+            args.horizon,
+            train_time_end_exclusive=train_time_end,
+            val_time_end_exclusive=int(val_time_end),
+        )
+        split_info = dict(split_info)
+        split_info["split_protocol"] = PROFILE_COMPATIBLE_SPLIT_PROTOCOL
+        split_info["missing_space_protocol"] = DUAL_SPACE_MISSING_PROTOCOL
+        train_set = Subset(dataset, train_indices.tolist())
+        val_set = Subset(dataset, val_indices.tolist())
+        test_set = Subset(dataset, test_indices.tolist())
+    elif args.protocol == "official":
         train_set, val_set, test_set, split_info = official_split(dataset)
     else:
         explicit_event_index = (
@@ -253,9 +350,11 @@ def main() -> int:
     ).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-3)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 30, 40, 50], gamma=0.1)
-    mean = float(np.asarray(scaler.traffic_scaler.mean).reshape(-1)[0])
-    std = float(np.asarray(scaler.traffic_scaler.std).reshape(-1)[0])
+    traffic_scaler = scaler if dual_space else scaler.traffic_scaler
+    mean = float(np.asarray(traffic_scaler.mean).reshape(-1)[0])
+    std = float(np.asarray(traffic_scaler.std).reshape(-1)[0])
     config = vars(args).copy()
+    contract = event_free_feature_contract()
     config.update({
         "model": "dcrnn_resilience_official_adapted",
         "model_name": "dcrnn_resilience_official_adapted",
@@ -263,6 +362,12 @@ def main() -> int:
         "dataset": dataset_name, "dataset_name": dataset_name,
         "feature_names": feature_names, "input_dim": scaled.shape[-1],
         "node_count": len(nodes), "trainable_parameters": count_trainable_parameters(model),
+        "node_names": nodes,
+        "input_features": contract["input_features"],
+        "event_features": contract["event_features"],
+        "weather_features": contract["weather_features"],
+        "scaler": scaler_metadata(traffic_scaler),
+        "imputation": imputation_metadata,
         "split_info": split_info,
         "source_repository": "https://github.com/Charles117/resilience_shenzhen",
         "implementation_scope": "official-code-adapted PyTorch reimplementation; private data and unpublished resilience code unavailable",

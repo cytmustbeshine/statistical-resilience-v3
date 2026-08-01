@@ -149,3 +149,25 @@ No training was run. The audit constructed physical NaN-preserving and train-onl
 Result: B-0 failed. Existing DGCN and DCRNN runners still use legacy loaders/splits/scalers; prediction NPZ and checkpoint metadata do not yet expose the full R3 dual-space mask/imputation contract; M2/M3 runner fairness contracts are not implemented. The required next work is a separately controlled runner wiring repair, not B-S training.
 
 Verification: compilation passed; B-0 tests 5/5; complete unittest discovery 208/208; pytest unavailable. No backward or optimizer step was called. Formal partial outputs remained unchanged.
+
+## E-L4-2B-0R runner-contract repair (2026-08-02)
+Scope: repaired runner wiring only. No neural training, no B-S smoke, no optimizer step, no backward call, no model/loss/L4-definition changes.
+
+Implemented changes:
+- Added a shared dual-space bundle path that keeps raw physical values with NaN for L4 truth and builds finite train-only node-median model inputs for scaling/model tensors.
+- Extended checkpoint metadata with dual-space imputation details and extended prediction NPZ archives with physical truth masks and L4 valid masks.
+- Added explicit opt-in dual-space arguments to `run_l4_prediction_baseline.py` and `baselines/dcrnn_resilience_official_adapted/train.py`; legacy defaults remain unchanged.
+- Updated `evaluate_l4_event_prediction.py` so dual-space evaluation reloads NaN-preserving physical truth.
+- Reworked `audit_l4_2b_runner_contract.py` to validate runner source contracts, schema roundtrips, finite forward-only DGCN/DCRNN probes, timestamp/node contracts and partial-output integrity.
+
+Verification commands/results:
+- `py_compile` on the six modified Python files: passed.
+- `python audit_l4_2b_runner_contract.py --output-dir D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2b_0_contract`: passed with `stage_passed=true`, `e_l4_2b_training_authorized=true`, `blockers=[]`.
+- `python -m unittest tests.test_l4_2b_runner_contract -v`: 7/7 passed.
+- `python -m unittest tests.test_l4_prediction_pipeline tests.test_l4_missing_space_alignment -v`: 99/99 passed.
+- `python -m unittest discover -s D:\TrafficGNN\dstsgcn_code\tests -p "test_*.py" -q`: 210/210 passed.
+- `python -m pytest ...`: unavailable (`No module named pytest`); not reported as pytest success.
+
+Output roundtrip: all eight B-0 CSVs, decision JSON and Markdown report reloaded successfully from `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2b_0_contract`. Formal partial outputs remain unchanged at 24 `result.json` files and 24 unchanged hashes.
+
+Next allowed action: a separate E-L4-2B-S smoke stage may be run under the repaired contract. It was deliberately not run in this repair stage.

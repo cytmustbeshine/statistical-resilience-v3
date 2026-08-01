@@ -16,7 +16,14 @@ from l4_prediction_evaluation import (
     binary_state_metrics,
     regression_metrics,
 )
-from l4_prediction_pipeline import load_prediction_archive, load_ordered_univariate_series, paired_column_plan
+from l4_prediction_pipeline import (
+    DUAL_SPACE_MISSING_PROTOCOL,
+    LEGACY_MISSING_SPACE_PROTOCOL,
+    load_ordered_univariate_series,
+    load_ordered_univariate_series_physical,
+    load_prediction_archive,
+    paired_column_plan,
+)
 from resilience_metrics import detect_event_windows
 from run_l4_prediction_baseline import variable_plan
 
@@ -52,6 +59,9 @@ def aggregate_archive(path: Path) -> dict[str, object]:
         "train_end": int(np.asarray(archive["train_time_end_exclusive"]).item()),
         "val_end": int(np.asarray(archive["val_time_end_exclusive"]).item()),
         "history": int(np.asarray(archive["horizons"]).size),
+        "missing_space_protocol": str(np.asarray(archive.get("missing_space_protocol", LEGACY_MISSING_SPACE_PROTOCOL)).item()),
+        "physical_truth_valid_mask": archive.get("physical_truth_valid_mask"),
+        "l4_valid_mask": archive.get("l4_valid_mask"),
     }
 
 
@@ -181,7 +191,12 @@ def event_process_row(timestamps, truth, prediction, persistence, event_id, data
 
 def load_definition(dataset, variable, args, archive_path):
     config, full_columns, model_columns, full_indices, label, profile_root = variable_plan(dataset, variable, 41)
-    full_values, timestamps, _ = load_ordered_univariate_series(str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"])
+    if args.missing_space_protocol == DUAL_SPACE_MISSING_PROTOCOL:
+        full_values, timestamps, _ = load_ordered_univariate_series_physical(
+            str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"]
+        )
+    else:
+        full_values, timestamps, _ = load_ordered_univariate_series(str(config["csv"]), str(config["time_col"]), full_columns, config[f"{variable}_suffix"])
     archive = aggregate_archive(archive_path)
     train_end = int(archive["train_end"])
     profile_dir = Path(args.l4_dir) / dataset if profile_root == "l4" else Path(args.source_profile_dir) / dataset
@@ -350,6 +365,11 @@ def parse_args():
     parser.add_argument("--bootstrap-repetitions", type=int, default=1000)
     parser.add_argument("--block-length", type=int, default=12)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--missing-space-protocol",
+        choices=[LEGACY_MISSING_SPACE_PROTOCOL, DUAL_SPACE_MISSING_PROTOCOL],
+        default=LEGACY_MISSING_SPACE_PROTOCOL,
+    )
     return parser.parse_args()
 
 

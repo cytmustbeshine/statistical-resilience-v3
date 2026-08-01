@@ -143,3 +143,17 @@ Decision: reject B-0 and do not run E-L4-2B-S.
 R3 established that the dual-space utilities can preserve physical missing values and create finite train-only model inputs. However, the actual DGCN and public DCRNN runners have not been migrated to that contract. They still use legacy zero-filling/split/scaler paths, and the required prediction-mask, imputation-metadata, checkpoint and NPZ schemas are incomplete. M2/M3 fairness contracts are also absent.
 
 This is an engineering integration blocker, not a failure of the L4 definition or a model-quality result. The next phase must minimally wire the existing runners to the R3 contract and rerun B-0 without training. B-S, formal seeds, model selection and scientific conclusions remain unauthorized.
+
+## Accepted gate: E-L4-2B-0R runner contract repair (2026-08-02)
+Decision: accept the repaired no-training runner contract and authorize only a separately launched E-L4-2B-S smoke stage.
+
+Accepted evidence:
+1. DGCN and public DCRNN runners now expose explicit opt-in `profile_compatible_event_external` and `dual_space_train_only_median` protocols while preserving legacy defaults.
+2. Physical truth space preserves NaN values for L4 and metric masks; model-input space uses train-only node-median imputation and finite train-only scaling.
+3. Checkpoint metadata and prediction NPZ archives now carry imputation metadata, raw/model missing counts, physical truth masks and L4 valid masks.
+4. Evaluation can explicitly use the NaN-preserving physical loader for dual-space archives.
+5. B-0 forward-only DGCN/DCRNN probes are finite and no training action occurs.
+6. `model.py`, `train.py`, frozen profiles, thresholds and partial formal outputs remain unchanged.
+7. Compilation, B-0 tests and full unittest discovery pass.
+
+Boundary of this acceptance: no DCRNN/M1/M2/M3 training has occurred, no CVaR or L4 auxiliary-supervision result exists, and no final thesis model is selected. B-S smoke is now allowed as the next separate stage; formal three-seed experiments and scientific claims remain unauthorized until the smoke and subsequent gates pass.
