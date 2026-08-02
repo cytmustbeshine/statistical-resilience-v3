@@ -58,6 +58,10 @@ class RunnerContractAuditTests(unittest.TestCase):
         frame = pd.read_csv(self.ROOT / "runner_contract_audit.csv", encoding="utf-8-sig")
         self.assertTrue(frame["dual_contract_available"].all())
         self.assertTrue(frame["event_weather_excluded_in_dual_protocol"].all())
+        dcrnn = frame.loc[frame["component"] == "dcrnn"].iloc[0]
+        self.assertTrue(dcrnn["exports_checkpoint_schema"])
+        self.assertTrue(dcrnn["exports_prediction_schema"])
+        self.assertTrue(dcrnn["selects_checkpoint_by_physical_mae"])
 
 if __name__ == "__main__":
     unittest.main()

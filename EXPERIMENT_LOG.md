@@ -171,3 +171,24 @@ Verification commands/results:
 Output roundtrip: all eight B-0 CSVs, decision JSON and Markdown report reloaded successfully from `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2b_0_contract`. Formal partial outputs remain unchanged at 24 `result.json` files and 24 unchanged hashes.
 
 Next allowed action: a separate E-L4-2B-S smoke stage may be run under the repaired contract. It was deliberately not run in this repair stage.
+
+## E-L4-2B-S0 traffic-only runner smoke (2026-08-02)
+Environment: PyTorch 2.8.0+cu128, NVIDIA GeForce RTX 4060, Python `D:\soft\Python310\python.exe`. Configuration: Rainstorm and Typhoon, five name-matched nodes, history 12, horizon 12, seed 42, two epochs, 512 training windows, 256 validation windows and 256 test windows. Inputs used traffic only with `profile_compatible_event_external` split and `dual_space_train_only_median` missing-space protocol.
+
+Completed models: M0 `dcrnn_official_adapted` and M1 `dstsgcn_traffic_only`, four dataset-variable tasks each. All eight checkpoints and prediction archives roundtripped, physical truth masks were present, predictions were finite, and no event/weather input was used.
+
+Traffic MAE versus persistence MAE:
+- Rainstorm flow: DSTSGCN 61.4989, DCRNN 57.4139, persistence 40.1526.
+- Rainstorm speed: DSTSGCN 6.3908, DCRNN 5.8338, persistence 4.8213.
+- Typhoon flow: DSTSGCN 12.8918, DCRNN 13.6002, persistence 9.9133.
+- Typhoon speed: DSTSGCN 4.4327, DCRNN 4.0324, persistence 3.6297.
+
+L4 deficit MAE/Spearman/high-state F1:
+- Rainstorm flow: DSTSGCN 0.6279/0.2053/0.4488; DCRNN 0.5199/0.4688/0.5259.
+- Rainstorm speed: DSTSGCN 0.6494/0.2331/0.0702; DCRNN 0.6196/0.3924/0.5380.
+- Typhoon flow: DSTSGCN 0.4599/0.4874/0.0000; DCRNN 0.3715/0.6306/0.3536.
+- Typhoon speed: DSTSGCN 0.5701/0.6680/0.6636; DCRNN 0.7758/0.5706/0.5160.
+
+Decision output: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2b_s_smoke\e_l4_2b_s0_decision.json`. The M0/M1 engineering smoke passed, but full E-L4-2B-S did not pass because M2 L4 auxiliary supervision and M3 tail-risk/CVaR runners are not implemented. Formal training remains unauthorized.
+
+Verification: B-0 re-audit passed after adding actual DCRNN checkpoint/NPZ export and validation physical-MAE checkpoint selection. Complete unittest discovery passed 210/210. Pytest is unavailable. The protected formal directory remains 120 files and 492153111 bytes.

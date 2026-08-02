@@ -157,3 +157,21 @@ Accepted evidence:
 7. Compilation, B-0 tests and full unittest discovery pass.
 
 Boundary of this acceptance: no DCRNN/M1/M2/M3 training has occurred, no CVaR or L4 auxiliary-supervision result exists, and no final thesis model is selected. B-S smoke is now allowed as the next separate stage; formal three-seed experiments and scientific claims remain unauthorized until the smoke and subsequent gates pass.
+
+## Partial smoke acceptance: E-L4-2B-S0 M0/M1 (2026-08-02)
+Decision: accept the M0 DCRNN and M1 DSTSGCN traffic-only smoke as an engineering runner check, but reject completion of the full E-L4-2B-S stage.
+
+Accepted evidence:
+1. Eight Rainstorm/Typhoon flow/speed runs completed under the same dual-space split, node, scaler and mask contract.
+2. DCRNN and DSTSGCN checkpoints and prediction archives reloaded successfully.
+3. DCRNN checkpoint selection now uses validation physical-space MAE in the formal dual-space path.
+4. Physical missing truth remains masked rather than converted to zero for metrics and L4 postprocessing.
+5. All L4 deficit Spearman correlations in the smoke are positive.
+
+Reasons full B-S is not accepted:
+1. M2 final frozen-L4 auxiliary supervision has not been implemented or run.
+2. M3 tail-risk/CVaR training has not been implemented or run.
+3. Every capped two-epoch traffic run is worse than persistence MAE.
+4. High-state performance is unstable and one DSTSGCN Typhoon-flow run has F1=0.
+
+Consequence: do not run formal seeds, bootstrap or final model comparison. The next stage must implement and audit the true frozen-L4 supervision target and M2/M3 smoke runner without changing `model.py`, the frozen L4 definition, event windows or test thresholds. No final thesis model is selected.

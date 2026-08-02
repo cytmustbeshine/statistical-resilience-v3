@@ -44,11 +44,22 @@ def source_contract(path: Path, component: str) -> dict[str, object]:
     has_physical_loader = "load_ordered_univariate_series_physical" in text
     has_imputation = "impute_model_inputs_train_only" in text or "prepare_dual_space_bundle" in text
     has_profile_split = "profile_compatible_event_external_split" in text
+    exports_checkpoint_schema = "save_forecast_checkpoint" in text
+    exports_prediction_schema = "save_prediction_archive" in text
+    selects_checkpoint_by_physical_mae = 'selection_value = val["mae"]' in text or 'val_metrics["mae"] < best_val' in text
     if component == "evaluation":
         dual_available = has_physical_loader and "--missing-space-protocol" in text
         event_weather_excluded = True
     elif component == "dcrnn":
-        dual_available = has_dual_cli and has_physical_loader and has_imputation and has_profile_split
+        dual_available = (
+            has_dual_cli
+            and has_physical_loader
+            and has_imputation
+            and has_profile_split
+            and exports_checkpoint_schema
+            and exports_prediction_schema
+            and selects_checkpoint_by_physical_mae
+        )
         event_weather_excluded = "dual-space DCRNN contract excludes" in text
     else:
         dual_available = has_dual_cli and has_physical_loader and has_imputation and has_profile_split
@@ -62,6 +73,9 @@ def source_contract(path: Path, component: str) -> dict[str, object]:
         "uses_profile_split": bool(has_profile_split or component == "evaluation"),
         "legacy_loader_retained_for_default": bool("load_ordered_univariate_series(" in text or "load_wide_traffic_csv(" in text),
         "dual_contract_available": bool(dual_available),
+        "exports_checkpoint_schema": bool(exports_checkpoint_schema or component == "evaluation"),
+        "exports_prediction_schema": bool(exports_prediction_schema or component == "evaluation"),
+        "selects_checkpoint_by_physical_mae": bool(selects_checkpoint_by_physical_mae or component == "evaluation"),
         "event_weather_excluded_in_dual_protocol": bool(event_weather_excluded),
         "source_contains_backward": bool(".backward(" in text),
         "source_contains_optimizer_step": bool(".step(" in text),

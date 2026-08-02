@@ -3,7 +3,7 @@
 ## Research scope
 - The two-dimensional L4 statistical definition is frozen: flow lower-tail demand/service-volume deficit and speed lower-tail efficiency deficit remain separate.
 - Do not modify the model architecture, graph fusion, training loss, CVaR, uncertainty weighting, or conformal prediction until the corrected final forecasting protocol passes its stage gate.
-- E-L4-2B-0R passed after wiring DGCN/DCRNN runners to the explicit R3 dual-space contract. The next allowed step is a separate E-L4-2B-S smoke stage; no formal training, three-seed experiment, CVaR conclusion, L4 auxiliary-supervision conclusion, or final model selection has occurred.
+- E-L4-2B-S0 completed the M0 DCRNN and M1 DSTSGCN traffic-only engineering smoke under the R3 dual-space contract. Full E-L4-2B-S remains blocked because final frozen-L4 M2 auxiliary supervision and M3 tail-risk runners are not implemented. Do not run formal seeds, bootstrap or final model selection; the next step is a separately audited M2/M3 smoke implementation without changing `model.py`, the frozen L4 definition or event windows.
 - Read `PROJECT_MEMORY.md`, `EXPERIMENT_LOG.md`, and `DECISION_LOG.md` before substantial project work.
 
 ## Git workflow

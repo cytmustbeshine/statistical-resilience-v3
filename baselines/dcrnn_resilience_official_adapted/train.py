@@ -33,9 +33,14 @@ from l4_prediction_pipeline import (
     event_free_feature_contract,
     fit_train_only_scaler,
     impute_model_inputs_train_only,
+    load_forecast_checkpoint,
     load_ordered_univariate_series_physical,
+    load_prediction_archive,
     profile_compatible_event_external_split,
+    save_forecast_checkpoint,
+    save_prediction_archive,
     scaler_metadata,
+    target_tensor_from_indices,
 )
 from baselines.dcrnn_resilience_official_adapted.model import OfficialAdaptedDCRNN
 
@@ -180,16 +185,24 @@ def raw_masked_rmse(pred: torch.Tensor, target: torch.Tensor, mean: float, std: 
     return torch.sqrt(torch.mean((pred_raw[mask] - target_raw[mask]) ** 2) + 1e-12)
 
 
-def evaluate(model, loader, adj, mean, std, device):
+def evaluate(model, loader, adj, mean, std, device, physical_targets: np.ndarray | None = None):
     model.eval()
     totals = {"abs_sum": 0.0, "sq_sum": 0.0, "smape_sum": 0.0, "target_abs_sum": 0.0, "count": 0.0}
     horizon_abs = None
     horizon_count = None
+    target_offset = 0
     with torch.no_grad():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             pred = model(x, adj)
-            pred_raw, y_raw = pred * std + mean, y * std + mean
+            pred_raw = pred * std + mean
+            if physical_targets is None:
+                y_raw = y * std + mean
+            else:
+                batch_size = int(y.shape[0])
+                target_batch = np.asarray(physical_targets[target_offset:target_offset + batch_size], dtype=np.float32)
+                y_raw = torch.tensor(target_batch, dtype=pred_raw.dtype, device=device)
+                target_offset += batch_size
             batch = compute_metric_sums(pred_raw, y_raw)
             for key in totals:
                 totals[key] += batch[key]
@@ -207,6 +220,25 @@ def evaluate(model, loader, adj, mean, std, device):
         "wape": totals["abs_sum"] / max(totals["target_abs_sum"], 1e-6) * 100.0,
         "horizon_mae": (horizon_abs / torch.clamp(horizon_count, min=1)).tolist(),
     }
+
+
+@torch.no_grad()
+def collect_predictions(model, loader, adj, device) -> tuple[np.ndarray, np.ndarray]:
+    model.eval()
+    truth: list[np.ndarray] = []
+    prediction: list[np.ndarray] = []
+    for x, y in loader:
+        pred = model(x.to(device), adj)
+        truth.append(y.numpy())
+        prediction.append(pred.detach().cpu().numpy())
+    if not truth:
+        raise RuntimeError("prediction split contains no windows")
+    return np.concatenate(truth), np.concatenate(prediction)
+
+
+def limit_indices(indices: np.ndarray, limit: int) -> np.ndarray:
+    values = np.asarray(indices, dtype=int)
+    return values if int(limit) <= 0 else values[:int(limit)]
 
 
 def main() -> int:
@@ -243,6 +275,8 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--max-train-windows", type=int, default=0)
+    parser.add_argument("--max-eval-windows", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--event-col", default="")
     parser.add_argument("--exclude-cols", default="ID,id")
@@ -275,7 +309,7 @@ def main() -> int:
             args.max_nodes,
             args.value_columns,
         )
-        raw, _, nodes = load_ordered_univariate_series_physical(
+        raw, raw_timestamps, nodes = load_ordered_univariate_series_physical(
             args.csv,
             args.time_col,
             columns,
@@ -288,6 +322,7 @@ def main() -> int:
         scaler, scaled = fit_train_only_scaler(model_raw, train_time_end)
         feature_names = ["traffic"]
     else:
+        raw_timestamps = None
         raw, nodes, feature_names = load_wide_traffic_csv(
             args.csv,
             value_suffix=parse_optional_suffix(args.value_suffix),
@@ -322,11 +357,18 @@ def main() -> int:
         split_info = dict(split_info)
         split_info["split_protocol"] = PROFILE_COMPATIBLE_SPLIT_PROTOCOL
         split_info["missing_space_protocol"] = DUAL_SPACE_MISSING_PROTOCOL
+        train_indices = limit_indices(train_indices, args.max_train_windows)
+        val_indices = limit_indices(val_indices, args.max_eval_windows)
+        test_indices = limit_indices(test_indices, args.max_eval_windows)
         train_set = Subset(dataset, train_indices.tolist())
         val_set = Subset(dataset, val_indices.tolist())
         test_set = Subset(dataset, test_indices.tolist())
+        val_physical_targets = target_tensor_from_indices(raw, val_indices, args.history_steps, args.horizon)
+        test_physical_targets = target_tensor_from_indices(raw, test_indices, args.history_steps, args.horizon)
     elif args.protocol == "official":
         train_set, val_set, test_set, split_info = official_split(dataset)
+        val_physical_targets = None
+        test_physical_targets = None
     else:
         explicit_event_index = (
             resolve_time_index(args.csv, args.time_col, args.explicit_event_time)
@@ -338,6 +380,8 @@ def main() -> int:
             explicit_event_index=explicit_event_index,
             event_test_prehistory_steps=args.event_test_prehistory_steps,
         )
+        val_physical_targets = None
+        test_physical_targets = None
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
@@ -368,6 +412,12 @@ def main() -> int:
         "weather_features": contract["weather_features"],
         "scaler": scaler_metadata(traffic_scaler),
         "imputation": imputation_metadata,
+        "checkpoint_selection_metric": "validation_physical_mae" if dual_space else "validation_physical_rmse",
+        "smoke_limits": {
+            "train_windows": len(train_set),
+            "validation_windows": len(val_set),
+            "test_windows": len(test_set),
+        },
         "split_info": split_info,
         "source_repository": "https://github.com/Charles117/resilience_shenzhen",
         "implementation_scope": "official-code-adapted PyTorch reimplementation; private data and unpublished resilience code unavailable",
@@ -398,18 +448,91 @@ def main() -> int:
             batches_seen += 1
             train_sum += float(loss.item()) * x.size(0)
             seen += x.size(0)
-        val = evaluate(model, val_loader, adj, mean, std, args.device)
+        val = evaluate(model, val_loader, adj, mean, std, args.device, val_physical_targets)
         scheduler.step()
         threshold = model.sampling_threshold(batches_seen)
         print(f"Epoch {epoch:03d} | train_rmse={train_sum/max(seen,1):.4f} | val_mae={val['mae']:.4f} | val_rmse={val['rmse']:.4f} | sampling={threshold:.4f} | lr={optimizer.param_groups[0]['lr']:.2e}")
-        if val["rmse"] < best:
-            best = val["rmse"]
-            torch.save(model.state_dict(), best_path)
-    model.load_state_dict(torch.load(best_path, map_location=args.device))
-    test = evaluate(model, test_loader, adj, mean, std, args.device)
+        selection_value = val["mae"] if dual_space else val["rmse"]
+        if selection_value < best:
+            best = selection_value
+            if dual_space:
+                checkpoint_metadata = {
+                    "dataset": dataset_name,
+                    "variable": "speed" if parse_optional_suffix(args.value_suffix) == "_speed" else "flow",
+                    "node_names": nodes,
+                    "history": args.history_steps,
+                    "horizon": args.horizon,
+                    "train_time_end_exclusive": train_time_end,
+                    "val_time_end_exclusive": int(val_time_end),
+                    "seed": args.seed,
+                    "scaler": scaler_metadata(traffic_scaler),
+                    "timestamp_start": str(raw_timestamps[0]),
+                    "timestamp_end": str(raw_timestamps[-1]),
+                    "input_features": ["traffic"],
+                    "event_features": [],
+                    "weather_features": [],
+                    "split_protocol": PROFILE_COMPATIBLE_SPLIT_PROTOCOL,
+                    "missing_space_protocol": DUAL_SPACE_MISSING_PROTOCOL,
+                    "imputation": imputation_metadata,
+                    "raw_missing_count": int(imputation_metadata["raw_missing_count"]),
+                    "model_missing_count": int(imputation_metadata["model_missing_count"]),
+                    "checkpoint_selection_metric": "validation_physical_mae",
+                    "model_config": {
+                        "rnn_units": args.rnn_units,
+                        "num_rnn_layers": args.num_rnn_layers,
+                        "max_diffusion_step": args.max_diffusion_step,
+                    },
+                }
+                save_forecast_checkpoint(best_path, model.state_dict(), checkpoint_metadata)
+            else:
+                torch.save(model.state_dict(), best_path)
+    if dual_space:
+        checkpoint = load_forecast_checkpoint(best_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        model.load_state_dict(torch.load(best_path, map_location=args.device))
+    test = evaluate(model, test_loader, adj, mean, std, args.device, test_physical_targets)
     metrics = {key: value for key, value in test.items() if key != "horizon_mae"}
     metrics["horizon_mae"] = test["horizon_mae"]
     (out / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    if dual_space:
+        y_true_scaled, y_pred_scaled = collect_predictions(model, test_loader, adj, args.device)
+        y_true_physical = target_tensor_from_indices(
+            raw,
+            test_indices,
+            args.history_steps,
+            args.horizon,
+        )
+        y_pred_physical = traffic_scaler.inverse_transform(y_pred_scaled)
+        target_timestamps = np.asarray(raw_timestamps)[
+            test_indices[:, None]
+            + np.arange(args.history_steps, args.history_steps + args.horizon)[None, :]
+        ]
+        archive_path = out / "traffic_predictions.npz"
+        save_prediction_archive(
+            archive_path,
+            dataset=dataset_name,
+            variable="speed" if parse_optional_suffix(args.value_suffix) == "_speed" else "flow",
+            split="test_smoke",
+            target_timestamps=target_timestamps,
+            node_names=nodes,
+            y_true_scaled=y_true_scaled,
+            y_pred_scaled=y_pred_scaled,
+            y_true_physical=y_true_physical,
+            y_pred_physical=y_pred_physical,
+            train_time_end_exclusive=train_time_end,
+            val_time_end_exclusive=int(val_time_end),
+            scaler=scaler_metadata(traffic_scaler),
+            seed=args.seed,
+            missing_space_protocol=DUAL_SPACE_MISSING_PROTOCOL,
+            split_protocol=PROFILE_COMPATIBLE_SPLIT_PROTOCOL,
+            imputation=imputation_metadata,
+            physical_truth_valid_mask=np.isfinite(y_true_physical),
+            l4_valid_mask=np.isfinite(y_true_physical),
+        )
+        archive = load_prediction_archive(archive_path)
+        if archive["physical_truth_valid_mask"].shape != y_true_physical.shape:
+            raise RuntimeError("DCRNN prediction archive mask roundtrip failed")
     h = test["horizon_mae"]
     display = " ".join(f"h{i+1}={h[i]:.4f}" for i in (0, 2, 5, 11) if i < len(h))
     print(f"Test MAE={test['mae']:.4f}, RMSE={test['rmse']:.4f}, SMAPE={test['smape']:.2f}%, WAPE={test['wape']:.2f}%" + (f" | {display}" if display else ""))

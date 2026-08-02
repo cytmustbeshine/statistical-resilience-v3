@@ -149,3 +149,10 @@ The formal runner wiring blocker is repaired and B-0 now passes without training
 The shared pipeline now exports imputation metadata and physical/L4 valid masks through checkpoint and prediction NPZ schemas. Evaluation can load NaN-preserving physical truth for dual-space archives. B-0 re-audit reports `stage_passed=true`, `e_l4_2b_training_authorized=true`, `training_run=false`, `optimizer_step_called=false`, `backward_called=false`, and `blockers=[]`.
 
 No E-L4-2B-S smoke training, DCRNN training, M1/M2/M3 training, CVaR run, model selection, or thesis conclusion was performed in this repair. `model.py`, `train.py`, the frozen L4 definition, profiles, ECDFs, q90/q99 and recovery thresholds remain unchanged. The 24 partial formal result files remain byte-for-byte protected.
+
+## E-L4-2B-S0 traffic-only runner smoke (2026-08-02)
+The repaired dual-space runners were exercised on Rainstorm and Typhoon with five matched nodes, seed 42, two epochs, 512 training windows and 256 validation/test windows. M0 public DCRNN and M1 DSTSGCN traffic-only completed all eight dataset-variable runs, saved/reloaded auditable checkpoints and prediction NPZ archives, preserved physical truth masks, and produced finite physical traffic and L4 postprocessing results.
+
+This is only an engineering smoke. All eight traffic MAEs were worse than persistence under the deliberately capped two-epoch configuration. DCRNN was better than DSTSGCN on Rainstorm flow/speed and Typhoon speed; DSTSGCN was better on Typhoon flow. L4 deficit correlations were positive for all eight runs, but high-state F1 remained unstable, including zero for DSTSGCN Typhoon flow.
+
+The complete E-L4-2B-S stage is not accepted because final L4-aligned M2 auxiliary supervision and M3 tail-risk/CVaR runners are not implemented or run. Formal training, three seeds, bootstrap, L4 auxiliary-supervision claims, CVaR claims and final-model selection remain unauthorized. This is an implementation-stage blocker, not evidence against the dataset or frozen L4 definition.
