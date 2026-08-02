@@ -175,3 +175,14 @@ Reasons full B-S is not accepted:
 4. High-state performance is unstable and one DSTSGCN Typhoon-flow run has F1=0.
 
 Consequence: do not run formal seeds, bootstrap or final model comparison. The next stage must implement and audit the true frozen-L4 supervision target and M2/M3 smoke runner without changing `model.py`, the frozen L4 definition, event windows or test thresholds. No final thesis model is selected.
+
+## E-L4-2B final aligned decision (2026-08-02)
+Decision: reject the joint E-L4-2B candidate and do not select a final model.
+
+Accepted component: frozen two-dimensional L4 auxiliary supervision has limited evidence. Under the required common postprocessing rule, M2 improves continuous L4 MAE over M1 in 9/15 dataset-variable-seed comparisons. This supports further study of L4 auxiliary supervision but does not establish universal event resilience prediction.
+
+Rejected components: M3 improves q90 tail MAE over M2 in only 7/15 comparisons, so the preregistered CVaR tail-risk increment is not accepted. M3 improves ordinary traffic MAE over public DCRNN in only 3/15 comparisons, so A3-L4 superiority over DCRNN is not accepted. The joint stage gate therefore remains failed despite nondegenerate high-state predictions and some positive event-level bootstrap differences.
+
+Evaluation rule: final L4 evidence must always be computed from physical flow/speed forecasts through the read-only frozen L4 profile. M2/M3 auxiliary-head archives are training diagnostics and cannot replace `g_flow(Q_hat)` or `g_speed(V_hat)` in the final fair comparison.
+
+Consequence: keep the L4 statistical definition frozen, retain these results as a negative/partial ablation finding, do not tune CVaR on the test events, do not add a fourth seed, and do not describe any current candidate as the final thesis model. A separate preregistered decision is required before any new modeling stage.

@@ -192,3 +192,14 @@ L4 deficit MAE/Spearman/high-state F1:
 Decision output: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\e_l4_2b_s_smoke\e_l4_2b_s0_decision.json`. The M0/M1 engineering smoke passed, but full E-L4-2B-S did not pass because M2 L4 auxiliary supervision and M3 tail-risk/CVaR runners are not implemented. Formal training remains unauthorized.
 
 Verification: B-0 re-audit passed after adding actual DCRNN checkpoint/NPZ export and validation physical-MAE checkpoint selection. Complete unittest discovery passed 210/210. Pytest is unavailable. The protected formal directory remains 120 files and 492153111 bytes.
+
+## E-L4-2B formal aligned experiment and corrected analysis (2026-08-02)
+Environment: Python `D:\soft\Python310\python.exe`, CUDA training on NVIDIA GeForce RTX 4060. Formal root: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\formal_final`. Analysis root: `D:\TrafficGNN\outputs\e_l4_2_final_aligned_a3\analysis_final`.
+
+Configuration: datasets Bridge/Rainstorm/Typhoon; Bridge flow only; Rainstorm flow/speed; Typhoon fixed 16 matched nodes for flow/speed; seeds 42, 2024 and 3407; 20 epochs; history 12; horizon 12; batch size 64; `profile_compatible_event_external` split; `dual_space_train_only_median` missing-space protocol; traffic-only inputs; no event or weather features. Models: M0 public adapted DCRNN, M1 DSTSGCN traffic-only, M2 frozen L4 auxiliary supervision (`lambda_L4=0.30`), M3 M2 plus CVaR (`alpha=0.90`, `lambda_T=0.20`, `lambda_R=0.20`).
+
+Completed artifacts: 60 checkpoints, 15 M0 metrics files, 15 M1 result files and 30 M2/M3 result files. The final analysis command used 2000 paired moving-block bootstrap repetitions, block length 12 and seed 42. It generated traffic, horizon, continuous L4, q90/q99 tail, high/extreme state, four-state, event-process, ablation, seed-stability and bootstrap tables.
+
+Critical analysis correction: final M2/M3 L4 metrics are not read from the auxiliary-head archive. All M0-M3 final L4 predictions are recomputed from physical traffic predictions with the same frozen train-only profile. Corrected counts are M2 L4 MAE better than M1 in 9/15, M3 q90 tail MAE better than M2 in 7/15, and M3 traffic MAE better than DCRNN in 3/15. M3 high-state predictions are nondegenerate in 15/15 comparisons. Four-state macro-F1 means are 0.6891 for Rainstorm and 0.6904 for Typhoon.
+
+Verification: `py_compile` passed; unittest discovery passed 223/223; pytest invocation failed because pytest is not installed. All final output tables and the decision JSON roundtripped successfully. No training process remained active. Protected legacy partial outputs remained 24 `result.json`, 120 files and 492153111 bytes.
