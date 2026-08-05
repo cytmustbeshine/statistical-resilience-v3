@@ -186,3 +186,65 @@ Rejected components: M3 improves q90 tail MAE over M2 in only 7/15 comparisons, 
 Evaluation rule: final L4 evidence must always be computed from physical flow/speed forecasts through the read-only frozen L4 profile. M2/M3 auxiliary-head archives are training diagnostics and cannot replace `g_flow(Q_hat)` or `g_speed(V_hat)` in the final fair comparison.
 
 Consequence: keep the L4 statistical definition frozen, retain these results as a negative/partial ablation finding, do not tune CVaR on the test events, do not add a fourth seed, and do not describe any current candidate as the final thesis model. A separate preregistered decision is required before any new modeling stage.
+
+## 2026-08-04 A4 decision
+
+1. Reject capacity scaling alone as the next route; 128/160 dimensions did not improve validation consistently.
+2. Retain the locked hybrid pipeline as an engineering candidate because ordinary traffic metrics improved 15/15 against raw DCRNN.
+3. Do not call the hybrid result pure DSTSGCN superiority: the public DCRNN is an explicit component.
+4. Do not mark all resilience metrics as exceeded: Bridge seed 3407 q90 L4 tail MAE remains worse, giving 14/15 tail wins.
+5. Do not select a final thesis model from the previously inspected test archive. The next model stage must use a new outer holdout or external validation and focus on a pure temporal residual decoder rather than further ensemble-weight tuning.
+
+## 2026-08-04 A7 decision
+
+1. Reject A7 scheduled sampling as the next candidate: it improves direct-head M1 in 15/15 validation comparisons but improves free-running A6 in only 6/15.
+2. Do not tune the teacher-forcing decay, start ratio, gradient clipping or epoch budget from this result; the locked A7 gate failed.
+3. Do not evaluate A7 on the already-inspected event-test archive.
+4. Preserve the useful negative result: the A6 gain comes from autoregressive decoding itself, while teacher forcing does not materially improve its validation behavior and particularly weakens Rainstorm flow.
+5. Authorize design work for a materially new pure model combining traffic deep learning with explicit train-only statistical structure. DCRNN may be used only as a comparison baseline, never as an input, ensemble component or hidden-state source.
+6. Final confirmation must use a newly locked temporal holdout or external dataset, with configuration frozen before comparison.
+
+## 2026-08-04 A8 validation decision
+
+1. Accept A8 as the first pure post-A3 candidate to pass both seed-42 and three-seed train/validation gates.
+2. Freeze the three-expert architecture, robust gate inputs, equal gate initialization, auxiliary weight 0.10, hidden size 64, learning rate 0.001, 20 epochs and validation-MAE checkpoint selection.
+3. Do not evaluate or tune A8 on the previously inspected Bridge/Rainstorm/Typhoon event-test archive.
+4. Authorize external confirmation on PEMS04 and PEMS08 using fixed first-41-node volume and speed tasks, real timestamp sorting, train-only scaling/adjacency and a common chronological split.
+5. Compare against the public official-code-adapted DCRNN under the same data and metric pipeline. DCRNN remains comparison-only.
+6. A8 is not yet the final thesis model; success requires external test superiority across the locked ordinary metrics and statistical uncertainty analysis.
+
+## 2026-08-05 A8 external decision
+
+1. Reject A8 as the final model because the new PEMS external ordinary-metric gate failed.
+2. Do not adjust A8 expert weights, gate features, epochs or losses using the observed PEMS test ratios.
+3. Preserve the positive ablation: A8 is effective for PEMS08 speed, but its short-history DSTSGCN backbone remains inadequate for flow demand dynamics.
+4. Authorize A9 as a materially new model based on spatial identity, temporal identity, train-only seasonal statistics, robust traffic-state features and train-only correlation context.
+5. Use PEMS04/08 train and validation periods only for A9 selection. Their test periods are now historical evidence and cannot confirm A9.
+6. A9 confirmation must use a separately locked external dataset or untouched rolling-origin blocks not used for architecture or hyperparameter selection.
+
+## 2026-08-05 A9 validation decision
+
+1. Accept A9 as the validation-locked candidate because it improves frozen DCRNN validation MAE in all 12 PEMS04/08 dataset-variable-seed comparisons.
+2. Freeze all A9 architecture dimensions, seasonal shrinkage 7, 50-epoch budget, optimizer, loss and checkpoint selection before external evaluation.
+3. Do not evaluate A9 on PEMS04/08 test segments; those segments were already used to reject A8.
+4. Use PEMS03 as the new external confirmation dataset. The downloaded Zenodo artifact and checksum are frozen before training.
+5. Construct PEMS03 timestamps from its complete 26208-sample September-November 2018 five-minute sequence, then lock strict 60/20/20 chronological target-disjoint splits.
+6. Compare A9 against the same official-code-adapted DCRNN under common first-41-node data, train-only scaler/adjacency and physical metrics.
+
+## 2026-08-05 A9 external and A10 feasibility decision
+
+1. Reject A9 after its PEMS03 ordinary external gate failed; do not tune A9 from PEMS03 test results.
+2. Accept the strategic pivot to A10: retain the published DCRNN temporal backbone and add a transparent hierarchical statistical calibration layer.
+3. Freeze A10 components before new external testing: five-value persistence blend grid, node-by-horizon median residual, correction factor 0.25 and nonnegative clipping.
+4. The blend weight is selected only on validation data by minimizing the maximum of MAE/RMSE/SMAPE/WAPE ratios, with mean ratio as tie-breaker.
+5. A10 passed chronological half-validation evaluation in all 60 metric comparisons across five tasks and three seeds.
+6. Use PEMS07 as the next and final new external dataset. Download and checksum must be frozen before DCRNN training or calibration.
+
+## 2026-08-05 A10 PEMS07 complete confirmation
+
+1. The PEMS07 artifact, node order, strict chronological split, train-only statistics and pre-test isolation audit passed before test predictions were generated.
+2. A10 passed the locked ordinary gate: 3/3 wins for MAE, RMSE, SMAPE and WAPE, all four mean ratios below 1.0, 12/12 strict moving-block bootstrap improvements and 36/36 horizon-MAE improvements.
+3. The train-only flow-deficit resilience gate passed under the preregistered A9-consistent rule: deficit MAE, deficit RMSE and q90-tail deficit MAE each improved in 3/3 seeds, all three mean ratios below 1.0, and mean high-state F1 did not decrease.
+4. Mean ordinary ratios are 0.988701 MAE, 0.995057 RMSE, 0.952364 SMAPE and 0.988701 WAPE. Mean resilience ratios are 0.947488 deficit MAE, 0.928830 deficit RMSE and 0.894058 q90-tail MAE. Mean high-state F1 is 0.717946 for A10 versus 0.689878 for DCRNN.
+5. Select A10 as the current confirmed model for the frozen PEMS07 protocol. Do not claim universal superiority, causal event detection or superiority of a pure new graph architecture. Preserve the stop rules for future datasets and event interpretations.
+6. The Chinese delivery document is `A10成功方案过程说明.md`; authoritative machine-readable evidence is in `D:\TrafficGNN\outputs\a10_pems07_external_confirmation`.

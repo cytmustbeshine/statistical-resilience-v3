@@ -1,4 +1,4 @@
-# PROJECT MEMORY
+﻿# PROJECT MEMORY
 
 ## Research question
 Unknown-disruption traffic resilience prediction under event-scarce training data. Estimate train-only conditional normal distributions, construct a unified latent traffic-performance index, and later study tail-risk-aware forecasting and uncertainty.
@@ -165,3 +165,57 @@ A final-analysis audit found and corrected an evaluation inconsistency before ac
 Definitive result: M2 improves L4 continuous MAE over M1 in 9/15 dataset-variable-seed comparisons, so the preregistered evidence supports a limited L4 auxiliary-supervision effect. M3 improves q90 tail MAE over M2 in only 7/15 comparisons, so the CVaR increment is rejected. M3 improves ordinary traffic MAE over DCRNN in only 3/15 comparisons, so A3-L4 superiority over public DCRNN is rejected. All 15 M3 high-state runs are nondegenerate, but event and extreme-state reliability remains dataset-dependent. No final thesis model is selected and the joint E-L4-2B stage is not accepted.
 
 Engineering verification: 60 checkpoints are present; all analysis CSV/JSON/Markdown outputs reload; moving-block bootstrap used block length 12, 2000 repetitions and seed 42; 223 unittest tests pass. Pytest is not installed in `D:\soft\Python310\python.exe`. The protected legacy partial-formal directory remains 24 result files, 120 total files and 492153111 bytes.
+
+## A4 update (2026-08-04)
+
+Capacity parity did not rescue DSTSGCN. A validation-locked DCRNN+DSTSGCN+persistence hybrid improves all four ordinary traffic metrics in all 15 three-seed task comparisons, with 58/60 moving-block bootstrap intervals strictly favoring the candidate. Frozen L4 MAE/RMSE/F1 improve 15/15, but L4 q90 tail MAE improves 14/15. This is not a final model because it contains DCRNN and the current test archive has been viewed during sequential research. Next: preregister a pure temporal residual decoder and evaluate it on a new outer holdout or external dataset.
+
+## A6/A7 temporal decoder results (2026-08-04)
+
+A6 added a pure DSTSGCN node-shared GRU autoregressive decoder without DCRNN inputs. It passed three-seed validation 15/15 against direct-head M1 with mean MAE ratio 0.936472, but failed the already-inspected outer event archive: ordinary MAE/RMSE/WAPE improved only 5/15, SMAPE 7/15, and moving-block bootstrap strictly supported only 15/60 comparisons. No final model was selected.
+
+A7 preregistered linear scheduled sampling: teacher forcing decreases from 1 to 0 over the first 80% of optimizer steps and remains zero for the final 20%; validation is always free-running. Compilation, 8 targeted tests, CUDA dry-run and five-task smoke passed. The full three-seed validation remained 15/15 better than M1 (mean ratio 0.939980) but improved A6 in only 6/15 comparisons, with mean A7/A6 ratio 1.004128 and worst task-mean ratio 1.019695 for Rainstorm flow. A7 therefore failed its locked gate and the event-test archive was not evaluated.
+
+Decision boundary: stop tuning teacher forcing or curriculum schedules on these tasks. The next route must be materially different and must exclude DCRNN as a prediction component. A statistically constrained multi-decoder or regime-adaptive model may be explored using train/validation only, followed by a newly locked temporal or external confirmation set.
+
+## A8 statistical traffic-state mixture validation (2026-08-04)
+
+A8 is a new pure model that retains the DSTSGCN spatial backbone and fuses direct, free-running autoregressive and persistence forecasts. Its softmax gate uses the backbone state plus history-only robust level, trend and volatility summaries. DCRNN is not an input or ensemble component.
+
+The preregistered seed-42 gate passed 5/5 against A6 with mean MAE ratio 0.967245 and worst ratio 0.994486. The three-seed gate then passed 15/15 against A6 and 15/15 against M1. Mean A8/A6 validation MAE ratio is 0.974621; the worst dataset-variable mean is 0.995209. The maximum mean expert weight across all runs is 0.723704, so the gate did not collapse.
+
+Mean expert weights show interpretable task adaptation: Bridge flow is persistence-heavy (about 0.696); Rainstorm flow is more balanced; Rainstorm and Typhoon speed place the largest weight on the direct decoder. These are validation findings only. A8 is authorized for a newly locked PEMS04/PEMS08 external confirmation, not for renewed tuning or reuse of the old event-test archive.
+
+## A8 external PEMS rejection (2026-08-05)
+
+The isolated external confirmation completed 24 trained runs on first-41-node PEMS04/PEMS08 flow and speed tasks: A8 and official-code-adapted DCRNN, three seeds, common train-only scaler/adjacency and strict 60/20/20 chronological splits. All checkpoints were selected before the test segment was opened; the pre-unlock audit found zero test prediction files.
+
+A8 failed externally. It improved MAE/RMSE/WAPE in only 3/12 comparisons and SMAPE in 4/12. Mean A8/DCRNN ratios were 1.078171 MAE, 1.085090 RMSE, 1.059640 SMAPE and 1.078171 WAPE. The maximum task-mean ratio was 1.227724 and only 11/48 moving-block bootstrap intervals strictly favored A8. PEMS08 speed was the only task with consistent mean improvement; both flow tasks failed clearly.
+
+Decision boundary: A8 is rejected and must not be tuned from PEMS test results. The next model must address spatial-temporal sample identity and demand periodicity using train/validation evidence only, then use a new external dataset or untouched rolling-origin blocks for confirmation.
+
+## A9 statistical identity residual validation (2026-08-05)
+
+A9 replaces the DSTSGCN decoder route with a statistical residual identity model. It combines 12-step traffic history, learned node identity, five-minute time-of-day identity, day-of-week identity, one-step train-only correlation propagation and robust level/trend/volatility features. The neural network predicts a correction to a frozen node-by-time-slot-by-day-type median baseline with train-only shrinkage.
+
+A9 passed seed-42 validation 4/4 against the frozen public DCRNN with mean MAE ratio 0.837381 and worst ratio 0.909775. The three-seed gate then passed 12/12 with mean ratio 0.849806 and worst dataset-variable mean ratio 0.892152. Task-mean ratios were 0.804561 PEMS04 flow, 0.840287 PEMS04 speed, 0.892152 PEMS08 flow and 0.862223 PEMS08 speed. Seasonal baseline hashes were identical across seeds.
+
+PEMS04/08 test segments remain excluded from A9. A9 is authorized for a new PEMS03 external confirmation using the Zenodo file with verified MD5 `651add9bb9eaf7f5eda2f2ee8778a182` and a fixed September-November 2018 five-minute calendar.
+
+## A9 external rejection and A10 calibration feasibility (2026-08-05)
+
+A9 failed the new PEMS03 external test despite strong PEMS04/08 validation: MAE/RMSE/WAPE improved 0/3, SMAPE 2/3, mean ratios were 1.107192 MAE, 1.223102 RMSE, 0.970972 SMAPE and 1.107192 WAPE, and only 1/12 moving-block bootstrap intervals strictly favored A9. A9 is rejected without test-driven tuning.
+
+A10 changes strategy from replacing DCRNN to statistically calibrating it. Each validation period is split chronologically in half. The first half selects a DCRNN/persistence weight from {0.85, 0.90, 0.95, 1.00, 1.05}; a node-by-horizon median residual is then shrunk by a fixed factor 0.25 and forecasts are clipped to nonnegative physical values. The second validation half is untouched during fitting.
+
+Across PEMS04 flow/speed, PEMS08 flow/speed and PEMS03 flow, three seeds each, A10 improves MAE/RMSE/SMAPE/WAPE in all 60 holdout comparisons. Mean ratios are 0.981220 MAE, 0.985296 RMSE, 0.963417 SMAPE and 0.981220 WAPE; every individual ratio is below 0.999. This authorizes a new PEMS07 external confirmation.
+
+## A10 PEMS07 final confirmation (2026-08-05)
+
+The frozen A10 route passed the complete PEMS07 confirmation. A10 is the official-code-adapted DCRNN plus validation-only hierarchical statistical calibration: persistence blend grid `(0.85, 0.90, 0.95, 1.00, 1.05)`, node-by-horizon median residual, fixed correction shrinkage `0.25`, and nonnegative clipping. The PEMS07 artifact audit passed: 43,705,518 bytes, MD5 `978d3d9b85fe640a446983a34271a48d`, shape `(28224, 883, 1)`, first 41 nodes, strict chronological 60/20/20 target-disjoint split, and no test loader or test predictions before authorization.
+
+On the untouched PEMS07 test, A10 won all 3/3 seed comparisons for MAE, RMSE, SMAPE and WAPE. Mean ratios were 0.988701, 0.995057, 0.952364 and 0.988701. The locked 1,000-repetition moving-block bootstrap with block length 12 produced strict improvements in all 12 seed-metric comparisons, and horizon MAE improved in 36/36 comparisons.
+
+The authorized train-only flow-deficit analysis also passed: continuous deficit MAE, continuous deficit RMSE and q90-tail deficit MAE improved in 3/3 seeds, with mean ratios 0.947488, 0.928830 and 0.894058. Mean q90 high-state F1 increased from 0.689878 for DCRNN to 0.717946 for A10. PEMS07 has no trustworthy complete calendar, so the profile used observed sequence index modulo 288 and disabled weekday/weekend grouping without fabricating dates. Residual lag-1 dependence remained high (approximately 0.72-0.87), supporting block bootstrap rather than iid inference.
+
+Authoritative evidence is under `D:\TrafficGNN\outputs\a10_pems07_external_confirmation`, with the Chinese handoff document `A10成功方案过程说明.md`. This confirms A10 on the frozen PEMS07 protocol only; it does not justify a universal claim over every dataset or causal event interpretation.

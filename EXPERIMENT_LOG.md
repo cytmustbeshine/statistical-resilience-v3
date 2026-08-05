@@ -203,3 +203,88 @@ Completed artifacts: 60 checkpoints, 15 M0 metrics files, 15 M1 result files and
 Critical analysis correction: final M2/M3 L4 metrics are not read from the auxiliary-head archive. All M0-M3 final L4 predictions are recomputed from physical traffic predictions with the same frozen train-only profile. Corrected counts are M2 L4 MAE better than M1 in 9/15, M3 q90 tail MAE better than M2 in 7/15, and M3 traffic MAE better than DCRNN in 3/15. M3 high-state predictions are nondegenerate in 15/15 comparisons. Four-state macro-F1 means are 0.6891 for Rainstorm and 0.6904 for Typhoon.
 
 Verification: `py_compile` passed; unittest discovery passed 223/223; pytest invocation failed because pytest is not installed. All final output tables and the decision JSON roundtripped successfully. No training process remained active. Protected legacy partial outputs remained 24 `result.json`, 120 files and 492153111 bytes.
+
+## 2026-08-04 A4 capacity and hybrid audit
+
+- Capacity-parity validation used train/validation data only. Hidden dimensions 128 and 160 failed the preregistered gate: they improved only 2/5 and 1/5 tasks over hidden 64, with mean validation-MAE ratios 1.00098 and 1.00075.
+- A validation-locked hybrid candidate was then evaluated: DCRNN, traffic-only DSTSGCN and persistence were combined with pooled three-seed validation weights; Bridge used validation-fitted horizon residual calibration.
+- Ordinary test metrics versus DCRNN improved in 15/15 comparisons for MAE, RMSE, SMAPE and WAPE. Mean ratios were 0.9648, 0.9680, 0.9403 and 0.9648.
+- A 1,000-repetition moving-block bootstrap (block length 12) gave strictly negative intervals in 58/60 ordinary-metric comparisons.
+- Frozen-L4 postprocessing improved L4 MAE 15/15, L4 RMSE 15/15 and high-state F1 15/15; q90 tail MAE improved 14/15.
+- The candidate contains the public DCRNN component and the existing test archive had already been inspected sequentially. It is exploratory evidence, not a pure-model or confirmatory thesis win.
+
+## 2026-08-04 A7 curriculum decoder validation
+
+- Protocol: `A7_CURRICULUM_DECODER_PROTOCOL.md`.
+- Code: `temporal_decoder.py`, `run_a7_curriculum_validation.py`, `tests/test_temporal_decoder.py`, and `tests/test_a7_curriculum_validation.py`.
+- Engineering gates: compilation passed; 8 targeted unit tests passed; CUDA dry-run passed; five-task smoke produced finite validation metrics and no test loader.
+- Full output: `D:\TrafficGNN\outputs\a7_curriculum_full_validation`.
+- Full validation: 15 finite runs across seeds 42/2024/3407 and five dataset-variable tasks.
+- Relative to A6: 6/15 improvements, mean MAE ratio 1.0041276646, worst dataset-variable mean ratio 1.0196948642.
+- Relative to direct M1: 15/15 improvements, mean MAE ratio 0.9399804919.
+- Decision: `accepted=false`, `external_confirmation_authorized=false`; no event-test evaluation was run.
+- Full unittest discovery had 231/234 passes. The three failures are historical L4 tests that intentionally compare `model.py` against its pre-A6 frozen hash; the hash constant was not rewritten because doing so would alter the historical audit invariant.
+
+## 2026-08-04 A8 statistical mixture validation
+
+- Protocol: `A8_STATISTICAL_MIXTURE_DECODER_PROTOCOL.md`.
+- Code: `statistical_mixture_decoder.py`, `run_a8_statistical_mixture_validation.py`, and `tests/test_statistical_mixture_decoder.py`.
+- Architecture: direct DSTSGCN expert, free-running GRU expert and persistence expert with a history-only robust traffic-state softmax gate.
+- Engineering gates: compilation and 11 related tests passed; CUDA dry-run and five-task smoke completed with finite metrics.
+- Seed-42 A8-0: 5/5 improvements over A6, mean ratio 0.9672448338, worst ratio 0.9944864411; gate passed.
+- Three-seed A8-1 output: `D:\TrafficGNN\outputs\a8_statistical_mixture_a8_0`.
+- A8-1: 15/15 improvements over A6, 15/15 over direct M1, mean A8/A6 ratio 0.9746209044, worst task-mean ratio 0.9952086946.
+- Maximum run-level mean expert weight was 0.7237038612; no universal expert collapse occurred.
+- Decision: `accepted=true`, `external_confirmation_authorized=true`; the old event-test archive was not evaluated.
+
+## 2026-08-05 A8 external PEMS confirmation
+
+- Protocol: `A8_EXTERNAL_PEMS_CONFIRMATION_PROTOCOL.md`.
+- Runner: `run_a8_pems_external_confirmation.py`; analyzer: `analyze_a8_pems_external.py`.
+- Training completed 24/24 checkpoints before test evaluation: four PEMS04/08 flow/speed tasks, two models and three seeds.
+- Pre-unlock audit: 24 unique expected combinations, all checkpoints present, every training result marked validation-only, and zero test prediction archives.
+- External ordinary wins: MAE 3/12, RMSE 3/12, SMAPE 4/12 and WAPE 3/12.
+- Mean A8/DCRNN ratios: MAE 1.0781707068, RMSE 1.0850902296, SMAPE 1.0596396520 and WAPE 1.0781707068.
+- Moving-block bootstrap: 1,000 repetitions, block length 12; strictly favorable intervals 11/48.
+- PEMS08 speed task mean improved, while PEMS04 flow and especially PEMS08 flow failed materially.
+- Decision: `ordinary_metric_gate_passed=false`, `statistical_resilience_analysis_authorized=false`, `final_model_selected=false`. A8 is stopped without test-driven tuning.
+
+## 2026-08-05 A9 statistical identity validation
+
+- Protocol: `A9_STATISTICAL_IDENTITY_RESIDUAL_PROTOCOL.md`.
+- Code: `statistical_identity_model.py`, `run_a9_statistical_identity_validation.py`, and `tests/test_statistical_identity_model.py`.
+- Model inputs: history, node embedding, time-of-day embedding, day-of-week embedding, train-only correlation context and robust level/trend/volatility.
+- Statistical anchor: train-only node x five-minute slot x weekday/weekend median with fixed shrinkage 7; neural output is a residual around this baseline.
+- Engineering gates: compilation, six related tests, real-data dry-run and four-task smoke passed without constructing a test loader.
+- A9-0 seed42: 4/4 validation improvements over DCRNN, mean ratio 0.8373809939 and worst ratio 0.9097748896.
+- A9-1: 12/12 improvements, mean ratio 0.8498057856, worst task-mean ratio 0.8921522487 and seed-invariant seasonal baseline hashes.
+- Output: `D:\TrafficGNN\outputs\a9_statistical_identity_a9_0`.
+- Decision: `accepted=true`, `confirmation_authorized=true`; PEMS04/08 test predictions were not generated for A9.
+- New external data: Zenodo PEMS03 NPZ downloaded to `D:\TrafficGNN\data\public\PEMS03\PEMS03.npz`; size 15,800,415 bytes and MD5 verified.
+
+## 2026-08-05 A9 external PEMS03 rejection
+
+- Six A9/DCRNN checkpoints completed before test unlock; combination, file, calendar, validation-only and seasonal-hash audits passed, with zero pre-unlock test archives.
+- External wins: MAE 0/3, RMSE 0/3, SMAPE 2/3 and WAPE 0/3.
+- Mean A9/DCRNN ratios: 1.1071916376 MAE, 1.2231018240 RMSE, 0.9709724453 SMAPE and 1.1071916376 WAPE.
+- Moving-block bootstrap: 1/12 strictly favorable intervals.
+- Decision: reject A9 and do not run statistical resilience analysis or test-driven tuning.
+
+## 2026-08-05 A10 hierarchical statistical calibration feasibility
+
+- Calibration model: public DCRNN forecast blended with persistence; validation-only weight grid {0.85, 0.90, 0.95, 1.00, 1.05}; node-by-horizon median residual correction shrunk by fixed 0.25; physical nonnegative clipping.
+- Evaluation design: first half of each validation period fits calibration, second half is untouched evaluation.
+- Tasks: PEMS04 flow/speed, PEMS08 flow/speed and PEMS03 flow, three seeds each.
+- Results: 15/15 improvements for each of MAE, RMSE, SMAPE and WAPE, giving 60/60 metric improvements.
+- Mean ratios: 0.981220 MAE, 0.985296 RMSE, 0.963417 SMAPE and 0.981220 WAPE; maximum individual ratios remained below 0.999.
+- Output: `D:\TrafficGNN\outputs\a10_statistical_calibration_feasibility`.
+- Decision: authorize frozen A10 confirmation on a new PEMS07 dataset; PEMS03 test cannot be reused.
+
+## 2026-08-05 A10 PEMS07 final confirmation
+
+- Pre-unlock audit: PEMS07 exists with size 43,705,518 bytes and MD5 `978d3d9b85fe640a446983a34271a48d`; three unique seed/checkpoint/calibration combinations exist; all training/calibration records are validation-only; no test loader or test prediction existed before evaluation.
+- Engineering gate: A10 modules compiled and 4 targeted tests passed before evaluation; the resilience extension then passed 41 targeted statistical tests including train-only profile, missing-value and block-resampling checks.
+- Ordinary evaluation: PEMS07 first 41 nodes, strict chronological target-disjoint split, seeds 42/2024/3407. A10 won MAE/RMSE/SMAPE/WAPE in 3/3 comparisons for every metric. Mean ratios were 0.988701 MAE, 0.995057 RMSE, 0.952364 SMAPE and 0.988701 WAPE.
+- Ordinary uncertainty: 1,000 moving-block bootstrap repetitions, block length 12; strict improvements were 12/12. Horizon MAE improved in 36/36 comparisons.
+- Statistical resilience: train-only sequence-index-mod-288 conditional ECDF profile, weekday/weekend disabled because a trustworthy complete calendar is unavailable. Deficit MAE/RMSE/q90-tail MAE wins were each 3/3; mean ratios were 0.947488, 0.928830 and 0.894058. Mean high-state F1 increased from 0.689878 to 0.717946.
+- Authoritative decision: `D:\TrafficGNN\outputs\a10_pems07_external_confirmation\a10_final_decision.json` reports ordinary and resilience gates passed and `final_model_selected=true`.
